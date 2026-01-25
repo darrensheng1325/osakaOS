@@ -45,25 +45,42 @@ VideoGraphicsArray::VideoGraphicsArray() :
     FrameBufferSegment = pixels; // Use pixels array as framebuffer
     memset(pixels, 0, sizeof(pixels));
     
-    // Initialize default EGA palette
+    // Initialize default EGA palette - use the same calculation as the original VGA driver
+    // VGA writes 6-bit values (0-63) to palette registers, which need to be scaled to 8-bit (0-255)
+    // Scale factor: 255/63 ≈ 4.048, but we use 4 for exact match with QEMU
     for (uint16_t color = 0; color < 256; color++) {
-        uint8_t r = 0, g = 0, b = 0;
+        uint8_t r6 = 0, g6 = 0, b6 = 0; // 6-bit values (0-63)
+        uint8_t r = 0, g = 0, b = 0;    // 8-bit values (0-255)
         
         switch (color / 64) {
             case 0:
-                r = (color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0);
-                g = (color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0);
-                b = (color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0);
+                r6 = (color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0);
+                g6 = (color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0);
+                b6 = (color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0);
+                // Scale 6-bit to 8-bit: multiply by 4
+                r = r6 * 4;
+                g = g6 * 4;
+                b = b6 * 4;
                 break;
             case 1:
-                r = ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) >> 3;
-                g = ((color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0)) >> 3;
-                b = ((color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0)) >> 3;
+                r6 = ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) >> 3;
+                g6 = ((color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0)) >> 3;
+                b6 = ((color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0)) >> 3;
+                r = r6 * 4;
+                g = g6 * 4;
+                b = b6 * 4;
                 break;
             case 2:
-                r = ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) << 3;
-                g = ((color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0)) << 3;
-                b = ((color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0)) << 3;
+                r6 = ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) << 3;
+                g6 = ((color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0)) << 3;
+                b6 = ((color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0)) << 3;
+                // Clamp to 63 (6-bit max) before scaling
+                if (r6 > 63) r6 = 63;
+                if (g6 > 63) g6 = 63;
+                if (b6 > 63) b6 = 63;
+                r = r6 * 4;
+                g = g6 * 4;
+                b = b6 * 4;
                 break;
             default:
                 r = g = b = 0;

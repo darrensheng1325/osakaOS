@@ -379,7 +379,11 @@ void Window::OnKeyDown(char str) {
 				break;
 			default:		
 				this->app->OnKeyDown(str, this);
-				break;
+				// Don't call CompositeWidget::OnKeyDown for normal keys when app handles them
+				// This prevents double processing (app handles it, then focused child processes it again)
+				// Only set keypress flag
+				this->keypress = true;
+				return;
 		}
 	}
 	CompositeWidget::OnKeyDown(str);

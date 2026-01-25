@@ -2,6 +2,7 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <string.h>
+#include <stdint.h>
 
 using namespace os::common;
 using namespace os::drivers;
@@ -22,7 +23,9 @@ static uint8_t jsKeyToScanCode(const char* key) {
     if (key && strcmp(key, "ArrowUp") == 0) return 0x48;
     if (key && strcmp(key, "ArrowDown") == 0) return 0x50;
     if (key && strcmp(key, "ArrowRight") == 0) return 0x4d;
-    if (key && strcmp(key, "Meta") == 0) return 0x5b; // Windows/Command key
+    // Changed from Meta (Command/Windows key) to Backquote to avoid browser capture
+    // Use backtick/tilde key (`/~) instead of Command/Windows key
+    if (key && (strcmp(key, "Backquote") == 0 || strcmp(key, "`") == 0 || strcmp(key, "~") == 0)) return 0x5b;
     
     // Letters
     if (key && strlen(key) == 1 && key[0] >= 'a' && key[0] <= 'z') {
@@ -47,6 +50,19 @@ extern "C" {
     }
     
     EM_JS(void, setupKeyboardEvents, (), {
+        // Prevent duplicate event listeners
+        if (Module._keyboardEventsSetup) {
+            console.log('[JS] Keyboard events already setup, skipping');
+            return;
+        }
+        Module._keyboardEventsSetup = true;
+        
+        // Export keyboard handler pointer to JavaScript
+        // This will be set by the KeyboardDriver constructor
+        if (typeof Module._g_keyboardHandler === 'undefined') {
+            Module._g_keyboardHandler = null;
+        }
+        
         var handler = null;
         
         function keyToScanCode(key, shift, caps) {
@@ -70,7 +86,10 @@ extern "C" {
                     case 'ArrowUp': code = 0x48; break;
                     case 'ArrowDown': code = 0x50; break;
                     case 'ArrowRight': code = 0x4d; break;
-                    case 'Meta': code = 0x5b; break;
+                    // Changed from Meta to Backquote to avoid browser capture
+                    case 'Backquote':
+                    case '`':
+                    case '~': code = 0x5b; break;
                     default: code = key.charCodeAt(0); break;
                 }
             }
@@ -78,7 +97,27 @@ extern "C" {
         }
         
         document.addEventListener('keydown', function(e) {
-            if (!Module._g_keyboardHandler) return;
+            // Check if handler is available
+            if (!Module._g_keyboardHandler) {
+                // Try to get handler from C++ if not set
+                // This can happen if the handler is set after the event listener is attached
+                return;
+            }
+            
+            // Prevent default browser behavior for most keys to avoid conflicts
+            // Allow default for F-keys and some special browser keys
+            var preventDefault = true;
+            if (e.key === 'F1' || e.key === 'F2' || e.key === 'F3' || e.key === 'F4' || 
+                e.key === 'F5' || e.key === 'F6' || e.key === 'F7' || e.key === 'F8' ||
+                e.key === 'F9' || e.key === 'F10' || e.key === 'F11' || e.key === 'F12') {
+                preventDefault = false; // Allow F-keys for browser dev tools
+            }
+            if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) {
+                preventDefault = true; // Prevent tab navigation, but allow Ctrl+Tab
+            }
+            if (preventDefault) {
+                e.preventDefault();
+            }
             
             var key = e.key;
             var shift = e.shiftKey;
@@ -93,10 +132,22 @@ extern "C" {
             // Convert key to character
             var char = key;
             if (key.length === 1) {
-                if (shift && key >= 'a' && key <= 'z') {
-                    char = key.toUpperCase();
-                } else if (!shift && key >= 'A' && key <= 'Z') {
-                    char = key.toLowerCase();
+                // Handle letter case conversion
+                if (key >= 'a' && key <= 'z') {
+                    if (shift) {
+                        char = key.toUpperCase();
+                    } else {
+                        char = key; // Already lowercase
+                    }
+                } else if (key >= 'A' && key <= 'Z') {
+                    if (shift) {
+                        char = key; // Already uppercase
+                    } else {
+                        char = key.toLowerCase();
+                    }
+                } else {
+                    // For non-letter single characters (numbers, symbols), use as-is
+                    char = key;
                 }
             } else if (key === 'Enter') {
                 char = '\n';
@@ -116,6 +167,10 @@ extern "C" {
                 char = '\xfe';
             } else if (key === 'ArrowRight') {
                 char = '\xff';
+            } else if (key === 'Backquote' || key === '`' || key === '~') {
+                // Backquote key - map to Windows key (0x5b)
+                // Send a special character that will be recognized
+                char = '\x5b'; // Use 0x5b directly as character code
             } else {
                 return; // Unknown key
             }
@@ -183,9 +238,16 @@ KeyboardDriver::KeyboardDriver(InterruptManager* manager, KeyboardEventHandler *
     this->handler = handler;
     g_keyboardHandler = handler;
     
-    // Setup web keyboard events
+    // Export handler pointer for JavaScript
+    EM_ASM_({
+        Module._g_keyboardHandler = $0;
+        console.log('[C] Keyboard handler exported to JavaScript:', $0);
+    }, (uintptr_t)handler);
+    
+    // Setup web keyboard events (only once, even if multiple KeyboardDriver instances are created)
     EM_ASM({
         setupKeyboardEvents();
+        console.log('[C] Keyboard events setup complete, handler:', Module._g_keyboardHandler);
     });
 }
 
@@ -204,6 +266,8 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE void handleKeyDown(uint8_t keyCode) {
         if (g_keyboardHandler) {
             char ch = (char)keyCode;
+            // Set keyValue for compatibility (used by some code to check for Windows key)
+            g_keyboardHandler->keyValue = keyCode;
             g_keyboardHandler->OnKeyDown(ch);
         }
     }

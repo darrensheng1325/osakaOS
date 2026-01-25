@@ -1,4 +1,5 @@
 #include <drivers/mouse.h>
+#include <gui/desktop.h>
 #include <emscripten.h>
 #include <emscripten/html5.h>
 
@@ -9,6 +10,7 @@ extern "C" {
 using namespace os::common;
 using namespace os::drivers;
 using namespace os::hardwarecommunication;
+using namespace os::gui;
 
 // Global mouse handler for web events
 static MouseEventHandler* g_mouseHandler = nullptr;
@@ -53,7 +55,28 @@ MouseDriver::MouseDriver(InterruptManager* manager, MouseEventHandler* handler)
         function setupMouseEvents(canvas, isTextCanvas) {
             if (!canvas) return;
             
+            var isMouseDown = false;
+            
+            var isPointerLocked = false;
+            
+            // Request pointer lock on click for graphics canvas
+            if (!isTextCanvas) {
+                // Handle pointer lock change
+                var pointerLockChangeHandler = function() {
+                    isPointerLocked = document.pointerLockElement === canvas;
+                    console.log('[JS] Pointer lock:', isPointerLocked ? 'locked' : 'unlocked');
+                };
+                document.addEventListener('pointerlockchange', pointerLockChangeHandler);
+                
+                document.addEventListener('pointerlockerror', function() {
+                    console.error('[JS] Pointer lock error');
+                    isPointerLocked = false;
+                });
+            }
+            
             canvas.addEventListener('mousedown', function(e) {
+                e.preventDefault(); // Prevent default to allow dragging
+                isMouseDown = true;
                 console.log('[JS] Mouse down event on canvas, handler:', Module._g_mouseHandler);
                 if (!Module._g_mouseHandler) {
                     console.error('[JS] Mouse handler not available!');
@@ -64,9 +87,13 @@ MouseDriver::MouseDriver(InterruptManager* manager, MouseEventHandler* handler)
                 if (e.button === 1) button = 2; // Middle button
                 if (e.button === 2) button = 3; // Right button
                 
+                var x, y;
+                
+                // Always use actual click coordinates for clicks
+                // Pointer lock affects movement, not click position
                 var rect = canvas.getBoundingClientRect();
-                var x = e.clientX - rect.left;
-                var y = e.clientY - rect.top;
+                x = e.clientX - rect.left;
+                y = e.clientY - rect.top;
                 
                 // Scale coordinates
                 if (isTextCanvas) {
@@ -79,12 +106,25 @@ MouseDriver::MouseDriver(InterruptManager* manager, MouseEventHandler* handler)
                     y = Math.floor(y * 200 / rect.height);
                 }
                 
-                console.log('[JS] Calling handleMouseDown with button:', button, 'x:', x, 'y:', y);
+                // Always update tracked position on click
+                // This ensures the mouse position is accurate even when pointer locked
+                Module._lastMouseX = x;
+                Module._lastMouseY = y;
+                
+                // Request pointer lock after setting position (only for graphics canvas)
+                // Only request if not already locked
+                if (!isTextCanvas && !isPointerLocked && canvas.requestPointerLock) {
+                    canvas.requestPointerLock();
+                }
+                
+                console.log('[JS] Calling handleMouseDown with button:', button, 'x:', x, 'y:', y, 'pointerLocked:', isPointerLocked);
                 Module.ccall('handleMouseDown', null, ['number', 'number', 'number'], [button, x, y]);
                 console.log('[JS] handleMouseDown called');
             });
             
             canvas.addEventListener('mouseup', function(e) {
+                e.preventDefault();
+                isMouseDown = false;
                 if (!Module._g_mouseHandler) return;
                 
                 var button = 1;
@@ -94,32 +134,63 @@ MouseDriver::MouseDriver(InterruptManager* manager, MouseEventHandler* handler)
                 Module.ccall('handleMouseUp', null, ['number'], [button]);
             });
             
+            // Handle mouse leave to cancel drag
+            canvas.addEventListener('mouseleave', function(e) {
+                if (isMouseDown) {
+                    isMouseDown = false;
+                    if (Module._g_mouseHandler) {
+                        // Release all buttons on mouse leave
+                        Module.ccall('handleMouseUp', null, ['number'], [1]);
+                    }
+                }
+            });
+            
             canvas.addEventListener('mousemove', function(e) {
                 if (!Module._g_mouseHandler) return;
                 
-                var rect = canvas.getBoundingClientRect();
-                var x = e.clientX - rect.left;
-                var y = e.clientY - rect.top;
+                var dx = 0, dy = 0;
                 
-                // Scale coordinates
-                if (isTextCanvas) {
-                    x = Math.floor(x * 320 / rect.width);
-                    y = Math.floor(y * 200 / rect.height);
+                if (isPointerLocked && !isTextCanvas) {
+                    // Use movementX/Y for pointer locked mode (relative movement)
+                    dx = e.movementX || 0;
+                    dy = e.movementY || 0;
+                    
+                    // Update absolute position
+                    var x = (Module._lastMouseX || 160) + dx;
+                    var y = (Module._lastMouseY || 100) + dy;
+                    // Clamp to canvas bounds
+                    x = Math.max(0, Math.min(319, x));
+                    y = Math.max(0, Math.min(199, y));
+                    Module._lastMouseX = x;
+                    Module._lastMouseY = y;
                 } else {
-                    x = Math.floor(x * 320 / rect.width);
-                    y = Math.floor(y * 200 / rect.height);
+                    var rect = canvas.getBoundingClientRect();
+                    var x = e.clientX - rect.left;
+                    var y = e.clientY - rect.top;
+                    
+                    // Scale coordinates
+                    if (isTextCanvas) {
+                        x = Math.floor(x * 320 / rect.width);
+                        y = Math.floor(y * 200 / rect.height);
+                    } else {
+                        x = Math.floor(x * 320 / rect.width);
+                        y = Math.floor(y * 200 / rect.height);
+                    }
+                    
+                    // Calculate relative movement
+                    var lastX = Module._lastMouseX || 0;
+                    var lastY = Module._lastMouseY || 0;
+                    dx = x - lastX;
+                    dy = y - lastY;
+                    
+                    Module._lastMouseX = x;
+                    Module._lastMouseY = y;
                 }
                 
-                // Calculate relative movement
-                var lastX = Module._lastMouseX || 0;
-                var lastY = Module._lastMouseY || 0;
-                var dx = x - lastX;
-                var dy = y - lastY;
-                
-                Module._lastMouseX = x;
-                Module._lastMouseY = y;
-                
-                Module.ccall('handleMouseMove', null, ['number', 'number'], [dx, -dy]);
+                // Only send movement if there's actual movement
+                if (dx !== 0 || dy !== 0) {
+                    Module.ccall('handleMouseMove', null, ['number', 'number'], [dx, dy]);
+                }
             });
             
             canvas.addEventListener('contextmenu', function(e) {
@@ -152,6 +223,37 @@ extern "C" {
         // Use printf for logging (single argument version)
         printf("[C] handleMouseDown called\n");
         if (g_mouseHandler) {
+            // Cast to Desktop to access MouseX and MouseY
+            // Desktop inherits from MouseEventHandler, so this is safe
+            Desktop* desktop = dynamic_cast<Desktop*>(g_mouseHandler);
+            if (desktop) {
+                // Clamp coordinates to valid range
+                if (x < 0) x = 0;
+                if (x >= 320) x = 319;
+                if (y < 0) y = 0;
+                if (y >= 200) y = 199;
+                
+                // Calculate relative movement from current position to click position
+                int dx = (int)x - (int)desktop->MouseX;
+                int dy = (int)y - (int)desktop->MouseY;
+                
+                // Only move if there's actual movement needed
+                // This ensures the mouse position is set correctly on click
+                if (dx != 0 || dy != 0) {
+                    g_mouseHandler->OnMouseMove(dx, dy);
+                } else {
+                    // If already at the click position, ensure MouseX/MouseY are set correctly
+                    // This handles the case where MouseX/MouseY might be out of sync
+                    desktop->MouseX = x;
+                    desktop->MouseY = y;
+                }
+            } else {
+                // If not Desktop, try to move to position (for other handlers)
+                // This assumes current position is at center (160, 100) for 320x200
+                int dx = x - 160;
+                int dy = y - 100;
+                g_mouseHandler->OnMouseMove(dx, dy);
+            }
             g_mouseHandler->OnMouseDown(button);
             printf("[C] OnMouseDown called on handler\n");
         } else {

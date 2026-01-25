@@ -26,11 +26,12 @@
         #container {
             width: 100vw;
             height: 100vh;
-            position: relative;
+            position: fixed;
+            top: 0;
+            left: 0;
             overflow: hidden;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            margin: 0;
+            padding: 0;
         }
         
         h1 {
@@ -66,13 +67,20 @@
         }
         
         #osaka-canvas {
-            width: 100vw;
-            height: 100vh;
+            width: 100vw !important;
+            height: 100vh !important;
             image-rendering: pixelated;
             image-rendering: crisp-edges;
             background: #000;
             display: none; /* Hidden by default, shown when graphics mode is active */
-            object-fit: contain;
+            object-fit: cover; /* Fill entire screen, may crop edges */
+            cursor: none; /* Hide cursor on graphics canvas */
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            z-index: 1;
         }
         
         #osaka-text-canvas {
@@ -95,8 +103,8 @@
         <h1>osakaOS v2.1 - Web Edition</h1>
         <div id="loading">Loading osakaOS...</div>
         <div id="status" class="hidden"></div>
-        <canvas id="osaka-canvas" width="320" height="200"></canvas>
-        <canvas id="osaka-text-canvas" width="640" height="400"></canvas>
+        <canvas id="osaka-canvas" width="320" height="200" tabindex="0"></canvas>
+        <canvas id="osaka-text-canvas" width="640" height="400" tabindex="0"></canvas>
     </div>
     
     <!-- Fallback message if JS fails -->
@@ -141,6 +149,15 @@
             postRun: [],
             onRuntimeInitialized: function() {
                 console.log('[JS] Emscripten runtime initialized');
+                
+                // Focus the canvas so it can receive keyboard events
+                var graphicsCanvas = document.getElementById('osaka-canvas');
+                var textCanvas = document.getElementById('osaka-text-canvas');
+                if (graphicsCanvas) {
+                    graphicsCanvas.focus();
+                } else if (textCanvas) {
+                    textCanvas.focus();
+                }
                 
                 // Ensure safeReadAndPrintString and renderPixels are still available
                 // (Emscripten might have replaced the Module object)
@@ -624,6 +641,8 @@
             if (textCanvas && graphicsCanvas) {
                 textCanvas.style.display = 'block';
                 graphicsCanvas.style.display = 'none';
+                // Focus the text canvas so it can receive keyboard events
+                textCanvas.focus();
             }
         };
         
@@ -637,6 +656,8 @@
                 graphicsCanvas.style.display = 'block';
                 console.log('[JS] Canvas switched: text hidden, graphics shown');
                 console.log('[JS] Graphics canvas computed style:', window.getComputedStyle(graphicsCanvas).display);
+                // Focus the graphics canvas so it can receive keyboard events
+                graphicsCanvas.focus();
             } else {
                 console.error('[JS] Canvas elements not found!', {textCanvas, graphicsCanvas});
             }
@@ -916,29 +937,46 @@
             console.log('[JS] Canvas updated successfully');
         };
         
-        // Initialize EGA palette
+        // Initialize EGA palette - use the same calculation as the original VGA driver
+        // VGA writes 6-bit values (0-63) to palette registers, which need to be scaled to 8-bit (0-255)
+        // Scale factor: 255/63 ≈ 4.048, but we use 4 for exact match with QEMU
         for (var i = 0; i < 256; i++) {
-            Module.ega_palette[i] = [0, 0, 0];
-            var r = 0, g = 0, b = 0;
-            
+            var r6 = 0, g6 = 0, b6 = 0; // 6-bit values (0-63)
+            var r = 0, g = 0, b = 0;     // 8-bit values (0-255)
             switch (Math.floor(i / 64)) {
                 case 0:
-                    r = (i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0);
-                    g = (i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0);
-                    b = (i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0);
+                    r6 = (i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0);
+                    g6 = (i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0);
+                    b6 = (i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0);
+                    // Scale 6-bit to 8-bit: multiply by 4
+                    r = r6 * 4;
+                    g = g6 * 4;
+                    b = b6 * 4;
                     break;
                 case 1:
-                    r = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) >> 3;
-                    g = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) >> 3;
-                    b = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) >> 3;
+                    r6 = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) >> 3;
+                    g6 = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) >> 3;
+                    b6 = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) >> 3;
+                    r = r6 * 4;
+                    g = g6 * 4;
+                    b = b6 * 4;
                     break;
                 case 2:
-                    r = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) << 3;
-                    g = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) << 3;
-                    b = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) << 3;
+                    r6 = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) << 3;
+                    g6 = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) << 3;
+                    b6 = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) << 3;
+                    // Clamp to 63 (6-bit max) before scaling
+                    if (r6 > 63) r6 = 63;
+                    if (g6 > 63) g6 = 63;
+                    if (b6 > 63) b6 = 63;
+                    r = r6 * 4;
+                    g = g6 * 4;
+                    b = b6 * 4;
+                    break;
+                default:
+                    r = g = b = 0;
                     break;
             }
-            
             Module.ega_palette[i] = [r, g, b];
         }
         
