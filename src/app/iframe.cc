@@ -34,10 +34,13 @@ IframeApp::~IframeApp() {
 		var iframeId = 'osaka_iframe_' + $0;
 		var captureCanvasId = 'osaka_capture_' + $0;
 		
-		// Stop capture interval
+		// Stop intervals
 		if (Module.iframeApps && Module.iframeApps[iframeId]) {
 			if (Module.iframeApps[iframeId].captureInterval) {
 				clearInterval(Module.iframeApps[iframeId].captureInterval);
+			}
+			if (Module.iframeApps[iframeId].positionInterval) {
+				clearInterval(Module.iframeApps[iframeId].positionInterval);
 			}
 			delete Module.iframeApps[iframeId];
 		}
@@ -90,14 +93,22 @@ void IframeApp::ComputeAppState(GraphicsContext* gc, CompositeWidget* widget) {
 	// Note: widget->buf and widget->windowBuffer point to the same memory
 	// The window content area starts at (x+1, y+10) with size (w-1, h-10)
 	// But the buffer is relative to (0,0) of the widget, so we write at (1, 10) relative to widget
+	// Also update widget coordinates for iframe positioning
 	EM_ASM_({
 		if (Module.captureIframeToBuffer) {
+			// Update widget coordinates in the app object (for cross-origin iframe positioning)
+			if (Module.iframeApps && Module.iframeApps[$0]) {
+				Module.iframeApps[$0].widgetX = $1;
+				Module.iframeApps[$0].widgetY = $2;
+				Module.iframeApps[$0].widgetW = $3;
+				Module.iframeApps[$0].widgetH = $4;
+			}
 			// Write to the content area of the window (skip header)
-			Module.captureIframeToBuffer($0, 1, 10, $1 - 1, $2 - 10, $3);
+			Module.captureIframeToBuffer($0, 1, 10, $3 - 1, $4 - 10, $5);
 		} else {
 			console.error('[IframeApp C++] captureIframeToBuffer not found!');
 		}
-	}, this->iframeId, widget->w, widget->h, (uintptr_t)widget->buf);
+	}, this->iframeId, widget->x, widget->y, widget->w, widget->h, (uintptr_t)widget->buf);
 #else
 	// Non-web version: just draw a placeholder
 	gc->FillRectangle(widget->x, widget->y, widget->w, widget->h, 0x07);

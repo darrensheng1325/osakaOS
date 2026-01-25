@@ -1138,17 +1138,20 @@
             var existingCanvas = document.getElementById(captureCanvasId);
             if (existingCanvas) existingCanvas.parentNode.removeChild(existingCanvas);
             
-            // Create hidden iframe
+            // Create iframe - will be positioned based on same-origin vs cross-origin
             var iframe = document.createElement('iframe');
             iframe.id = iframeIdStr;
             iframe.src = url;
             iframe.style.position = 'absolute';
+            iframe.style.border = 'none';
+            iframe.style.pointerEvents = 'auto';
+            // Initially hidden, will be shown if cross-origin or positioned if same-origin
+            iframe.style.visibility = 'hidden';
             iframe.style.left = '-9999px';
             iframe.style.top = '-9999px';
             iframe.style.width = widgetW + 'px';
             iframe.style.height = widgetH + 'px';
-            iframe.style.border = 'none';
-            iframe.style.visibility = 'hidden';
+            iframe.style.zIndex = '1000';
             
             // Create capture canvas
             var captureCanvas = document.createElement('canvas');
@@ -1178,79 +1181,129 @@
             // Start capture when iframe loads
             iframe.onload = function() {
                 console.log('[IframeApp JS] Iframe loaded:', url);
-                var captureFrame = function() {
-                    console.log('[IframeApp JS] captureFrame called');
-                    try {
-                        var app = Module.iframeApps[iframeId];
-                        if (!app || !app.iframe || !app.captureCanvas) return;
-                        
-                        var ctx = app.captureCanvas.getContext('2d');
+                
+                // Check if we can access the iframe content (same-origin check)
+                var canAccess = false;
+                try {
+                    var testDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (testDoc && testDoc.body) {
+                        canAccess = true;
+                    }
+                } catch(e) {
+                    // Cross-origin - can't access
+                    canAccess = false;
+                }
+                
+                if (canAccess) {
+                    // Same-origin: capture and render to canvas
+                    console.log('[IframeApp JS] Same-origin iframe, using capture');
+                    var captureFrame = function() {
                         try {
-                            // Try to capture iframe content
-                            var iframeDoc = app.iframe.contentDocument || app.iframe.contentWindow.document;
-                            if (iframeDoc && iframeDoc.body) {
-                                // Same-origin: try to capture using html2canvas if available
-                                if (typeof html2canvas !== 'undefined') {
-                                    html2canvas(iframeDoc.body, {
-                                        canvas: app.captureCanvas,
-                                        width: app.widgetW,
-                                        height: app.widgetH,
-                                        scale: 1,
-                                        useCORS: true
-                                    }).then(function(canvas) {
-                                        // Canvas is already updated
-                                    }).catch(function(e) {
-                                        console.log('[IframeApp] html2canvas error:', e);
-                                        // Fallback: draw placeholder
-                                        ctx.fillStyle = '#333';
-                                        ctx.fillRect(0, 0, app.widgetW, app.widgetH);
-                                        ctx.fillStyle = '#fff';
-                                        ctx.font = '12px monospace';
-                                        ctx.fillText('Capture failed', 10, 20);
-                                    });
-                                } else {
-                                    // No html2canvas: try direct drawImage (only works for same-origin, no CORS)
-                                    try {
-                                        ctx.drawImage(app.iframe, 0, 0, app.widgetW, app.widgetH);
-                                    } catch(e) {
-                                        // Fallback: render iframe body to canvas manually
-                                        // This is a simplified approach - just draw a placeholder
-                                        ctx.fillStyle = '#333';
-                                        ctx.fillRect(0, 0, app.widgetW, app.widgetH);
-                                        ctx.fillStyle = '#fff';
-                                        ctx.font = '12px monospace';
-                                        ctx.fillText('Iframe loaded', 10, 20);
-                                        ctx.fillText('(Use html2canvas for', 10, 35);
-                                        ctx.fillText('better capture)', 10, 50);
+                            var app = Module.iframeApps[iframeId];
+                            if (!app || !app.iframe || !app.captureCanvas) return;
+                            
+                            var ctx = app.captureCanvas.getContext('2d');
+                            try {
+                                // Try to capture iframe content
+                                var iframeDoc = app.iframe.contentDocument || app.iframe.contentWindow.document;
+                                if (iframeDoc && iframeDoc.body) {
+                                    // Same-origin: try to capture using html2canvas if available
+                                    if (typeof html2canvas !== 'undefined') {
+                                        html2canvas(iframeDoc.body, {
+                                            canvas: app.captureCanvas,
+                                            width: app.widgetW,
+                                            height: app.widgetH,
+                                            scale: 1,
+                                            useCORS: true
+                                        }).then(function(canvas) {
+                                            // Canvas is already updated
+                                        }).catch(function(e) {
+                                            console.log('[IframeApp] html2canvas error:', e);
+                                            // Fallback: draw placeholder
+                                            ctx.fillStyle = '#333';
+                                            ctx.fillRect(0, 0, app.widgetW, app.widgetH);
+                                            ctx.fillStyle = '#fff';
+                                            ctx.font = '12px monospace';
+                                            ctx.fillText('Capture failed', 10, 20);
+                                        });
+                                    } else {
+                                        // No html2canvas: try direct drawImage
+                                        try {
+                                            ctx.drawImage(app.iframe, 0, 0, app.widgetW, app.widgetH);
+                                        } catch(e) {
+                                            // Fallback: render iframe body to canvas manually
+                                            ctx.fillStyle = '#333';
+                                            ctx.fillRect(0, 0, app.widgetW, app.widgetH);
+                                            ctx.fillStyle = '#fff';
+                                            ctx.font = '12px monospace';
+                                            ctx.fillText('Iframe loaded', 10, 20);
+                                        }
                                     }
                                 }
-                            } else {
-                                // Cross-origin - can't access document
-                                ctx.fillStyle = '#333';
-                                ctx.fillRect(0, 0, app.widgetW, app.widgetH);
-                                ctx.fillStyle = '#fff';
-                                ctx.font = '12px monospace';
-                                ctx.fillText('Cross-origin', 10, 20);
-                                ctx.fillText('Cannot capture', 10, 35);
+                            } catch(e) {
+                                console.log('[IframeApp] Capture error:', e);
                             }
                         } catch(e) {
-                            console.log('[IframeApp] Capture error:', e);
-                            // Fill with error message
-                            ctx.fillStyle = '#333';
-                            ctx.fillRect(0, 0, app.widgetW, app.widgetH);
-                            ctx.fillStyle = '#f00';
-                            ctx.font = '12px monospace';
-                            ctx.fillText('Capture error', 10, 20);
+                            console.log('[IframeApp] Frame capture error:', e);
                         }
-                    } catch(e) {
-                        console.log('[IframeApp] Frame capture error:', e);
+                    };
+                    
+                    // Start capture loop
+                    Module.iframeApps[iframeId].captureInterval = setInterval(captureFrame, 100);
+                    // Also capture immediately
+                    captureFrame();
+                } else {
+                    // Cross-origin: can't capture, but display iframe directly over window
+                    console.log('[IframeApp JS] Cross-origin iframe, displaying directly over window');
+                    Module.iframeApps[iframeId].isCrossOrigin = true;
+                    
+                    // Function to update iframe position over the window
+                    function updateIframePosition(iframeId) {
+                        var app = Module.iframeApps ? Module.iframeApps[iframeId] : null;
+                        if (!app || !app.iframe) return;
+                        
+                        // Get the OS canvas to calculate position
+                        var canvas = document.getElementById('osaka-canvas');
+                        if (!canvas) return;
+                        
+                        var canvasRect = canvas.getBoundingClientRect();
+                        var scaleX = canvasRect.width / 320;
+                        var scaleY = canvasRect.height / 200;
+                        
+                        // Calculate screen position for the window content area
+                        // Window content starts at (widgetX + 1, widgetY + 10) with size (widgetW - 1, widgetH - 10)
+                        var contentX = app.widgetX + 1;
+                        var contentY = app.widgetY + 10;
+                        var contentW = Math.max(1, app.widgetW - 1);
+                        var contentH = Math.max(1, app.widgetH - 10);
+                        
+                        var screenX = canvasRect.left + (contentX * scaleX);
+                        var screenY = canvasRect.top + (contentY * scaleY);
+                        var screenW = Math.max(1, contentW * scaleX);
+                        var screenH = Math.max(1, contentH * scaleY);
+                        
+                        app.iframe.style.left = screenX + 'px';
+                        app.iframe.style.top = screenY + 'px';
+                        app.iframe.style.width = screenW + 'px';
+                        app.iframe.style.height = screenH + 'px';
+                        app.iframe.style.visibility = 'visible';
+                        app.iframe.style.zIndex = '1000';
+                        app.iframe.style.pointerEvents = 'auto';
                     }
-                };
-                
-                // Start capture loop
-                Module.iframeApps[iframeId].captureInterval = setInterval(captureFrame, 100);
-                // Also capture immediately
-                captureFrame();
+                    
+                    // Position iframe immediately
+                    updateIframePosition(iframeId);
+                    
+                    // Store update function for later calls (when window moves/resizes)
+                    Module.iframeApps[iframeId].updatePosition = function() {
+                        updateIframePosition(iframeId);
+                    };
+                    
+                    // Also update position periodically in case window moves
+                    Module.iframeApps[iframeId].positionInterval = setInterval(function() {
+                        updateIframePosition(iframeId);
+                    }, 100);
+                }
             };
         };
         
@@ -1259,22 +1312,28 @@
         
         // Store in window for re-attachment
         window.captureIframeToBufferFunction = function(iframeId, offsetX, offsetY, contentW, contentH, bufferPtr) {
-            console.log('[IframeApp JS] captureIframeToBuffer called', {
-                iframeId: iframeId,
-                offsetX: offsetX,
-                offsetY: offsetY,
-                contentW: contentW,
-                contentH: contentH,
-                bufferPtr: bufferPtr
-            });
-            
             var app = Module.iframeApps ? Module.iframeApps[iframeId] : null;
-            if (!app || !app.captureCanvas || !bufferPtr) {
-                console.error('[IframeApp JS] captureIframeToBuffer: missing app/canvas/buffer', {
-                    hasApp: !!app,
-                    hasCanvas: app ? !!app.captureCanvas : false,
-                    bufferPtr: bufferPtr,
-                    iframeApps: Module.iframeApps
+            if (!app) {
+                console.error('[IframeApp JS] captureIframeToBuffer: app not found', iframeId);
+                return;
+            }
+            
+            // If cross-origin, update iframe position and skip capture (iframe is displayed directly)
+            if (app.isCrossOrigin) {
+                // Update widget coordinates from parameters (they're passed from C++)
+                // The widget coordinates are already updated in the EM_ASM_ call above
+                if (app.updatePosition) {
+                    app.updatePosition();
+                }
+                // Don't write anything to buffer - the iframe is displayed as an overlay
+                return;
+            }
+            
+            // Same-origin: proceed with capture
+            if (!app.captureCanvas || !bufferPtr) {
+                console.error('[IframeApp JS] captureIframeToBuffer: missing canvas/buffer', {
+                    hasCanvas: !!app.captureCanvas,
+                    bufferPtr: bufferPtr
                 });
                 return;
             }

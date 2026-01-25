@@ -144,12 +144,18 @@ CompositeWidget* Desktop::CreateChild(uint8_t appType, char* name, App* oldApp) 
 	Window* window = (Window*)memoryManager->malloc(sizeof(Window));
 	int32_t windowW = 180;
 	int32_t windowH = 80;
-	// For iframe apps, use a larger window
+	// For iframe apps, use a reasonable size (not too large for 320x200 screen)
 	if (appType == 4) {
-		windowW = 200;
-		windowH = 120;
+		windowW = 180;
+		windowH = 100;
 	}
-	new (window) Window(this, prng()%140, prng()%120, windowW, windowH, name, color, app, this->filesystem);
+	// Calculate random position ensuring window stays within screen bounds (320x200)
+	// Leave some margin from edges
+	int32_t maxX = WIDTH_13H - windowW - 10;  // 320 - windowW - 10 margin
+	int32_t maxY = HEIGHT_13H - windowH - 10; // 200 - windowH - 10 margin
+	int32_t windowX = (maxX > 0) ? (prng() % maxX) + 5 : 5;  // At least 5px from left
+	int32_t windowY = (maxY > 0) ? (prng() % maxY) + 5 : 5;  // At least 5px from top
+	new (window) Window(this, windowX, windowY, windowW, windowH, name, color, app, this->filesystem);
 	//new (window) Window(this, 70, 50, 180, 80, name, color, app, this->filesystem);
 	
 
