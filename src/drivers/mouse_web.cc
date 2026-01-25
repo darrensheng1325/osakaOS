@@ -2,6 +2,10 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 
+extern "C" {
+    void printf(char* strChr);
+}
+
 using namespace os::common;
 using namespace os::drivers;
 using namespace os::hardwarecommunication;
@@ -38,67 +42,97 @@ MouseDriver::MouseDriver(InterruptManager* manager, MouseEventHandler* handler)
     buttons = 0;
     pressed = false;
     
-    // Setup web mouse events
+    // Export handler pointer for JavaScript
+    EM_ASM_({
+        Module._g_mouseHandler = $0;
+    }, (uintptr_t)handler);
+    
+    // Setup web mouse events for both canvases
     EM_ASM({
-        var canvas = document.getElementById('osaka-canvas');
-        if (!canvas) return;
+        // Function to setup mouse events on a canvas
+        function setupMouseEvents(canvas, isTextCanvas) {
+            if (!canvas) return;
+            
+            canvas.addEventListener('mousedown', function(e) {
+                console.log('[JS] Mouse down event on canvas, handler:', Module._g_mouseHandler);
+                if (!Module._g_mouseHandler) {
+                    console.error('[JS] Mouse handler not available!');
+                    return;
+                }
+                
+                var button = 1; // Left button
+                if (e.button === 1) button = 2; // Middle button
+                if (e.button === 2) button = 3; // Right button
+                
+                var rect = canvas.getBoundingClientRect();
+                var x = e.clientX - rect.left;
+                var y = e.clientY - rect.top;
+                
+                // Scale coordinates
+                if (isTextCanvas) {
+                    // Text canvas is 640x400, scale to 320x200
+                    x = Math.floor(x * 320 / rect.width);
+                    y = Math.floor(y * 200 / rect.height);
+                } else {
+                    // Graphics canvas is 320x200
+                    x = Math.floor(x * 320 / rect.width);
+                    y = Math.floor(y * 200 / rect.height);
+                }
+                
+                console.log('[JS] Calling handleMouseDown with button:', button, 'x:', x, 'y:', y);
+                Module.ccall('handleMouseDown', null, ['number', 'number', 'number'], [button, x, y]);
+                console.log('[JS] handleMouseDown called');
+            });
+            
+            canvas.addEventListener('mouseup', function(e) {
+                if (!Module._g_mouseHandler) return;
+                
+                var button = 1;
+                if (e.button === 1) button = 2;
+                if (e.button === 2) button = 3;
+                
+                Module.ccall('handleMouseUp', null, ['number'], [button]);
+            });
+            
+            canvas.addEventListener('mousemove', function(e) {
+                if (!Module._g_mouseHandler) return;
+                
+                var rect = canvas.getBoundingClientRect();
+                var x = e.clientX - rect.left;
+                var y = e.clientY - rect.top;
+                
+                // Scale coordinates
+                if (isTextCanvas) {
+                    x = Math.floor(x * 320 / rect.width);
+                    y = Math.floor(y * 200 / rect.height);
+                } else {
+                    x = Math.floor(x * 320 / rect.width);
+                    y = Math.floor(y * 200 / rect.height);
+                }
+                
+                // Calculate relative movement
+                var lastX = Module._lastMouseX || 0;
+                var lastY = Module._lastMouseY || 0;
+                var dx = x - lastX;
+                var dy = y - lastY;
+                
+                Module._lastMouseX = x;
+                Module._lastMouseY = y;
+                
+                Module.ccall('handleMouseMove', null, ['number', 'number'], [dx, -dy]);
+            });
+            
+            canvas.addEventListener('contextmenu', function(e) {
+                e.preventDefault(); // Prevent right-click menu
+            });
+        }
         
-        var handler = null;
+        // Setup events for both canvases
+        var graphicsCanvas = document.getElementById('osaka-canvas');
+        var textCanvas = document.getElementById('osaka-text-canvas');
         
-        canvas.addEventListener('mousedown', function(e) {
-            if (!Module._g_mouseHandler) return;
-            
-            var button = 1; // Left button
-            if (e.button === 1) button = 2; // Middle button
-            if (e.button === 2) button = 3; // Right button
-            
-            var rect = canvas.getBoundingClientRect();
-            var x = e.clientX - rect.left;
-            var y = e.clientY - rect.top;
-            
-            // Scale to 320x200
-            x = Math.floor(x * 320 / rect.width);
-            y = Math.floor(y * 200 / rect.height);
-            
-            Module.ccall('handleMouseDown', null, ['number', 'number', 'number'], [button, x, y]);
-        });
-        
-        canvas.addEventListener('mouseup', function(e) {
-            if (!Module._g_mouseHandler) return;
-            
-            var button = 1;
-            if (e.button === 1) button = 2;
-            if (e.button === 2) button = 3;
-            
-            Module.ccall('handleMouseUp', null, ['number'], [button]);
-        });
-        
-        canvas.addEventListener('mousemove', function(e) {
-            if (!Module._g_mouseHandler) return;
-            
-            var rect = canvas.getBoundingClientRect();
-            var x = e.clientX - rect.left;
-            var y = e.clientY - rect.top;
-            
-            // Scale to 320x200
-            x = Math.floor(x * 320 / rect.width);
-            y = Math.floor(y * 200 / rect.height);
-            
-            // Calculate relative movement
-            var lastX = Module._lastMouseX || 0;
-            var lastY = Module._lastMouseY || 0;
-            var dx = x - lastX;
-            var dy = y - lastY;
-            
-            Module._lastMouseX = x;
-            Module._lastMouseY = y;
-            
-            Module.ccall('handleMouseMove', null, ['number', 'number'], [dx, -dy]);
-        });
-        
-        canvas.addEventListener('contextmenu', function(e) {
-            e.preventDefault(); // Prevent right-click menu
-        });
+        setupMouseEvents(graphicsCanvas, false);
+        setupMouseEvents(textCanvas, true);
     });
 }
 
@@ -115,8 +149,13 @@ void MouseDriver::Activate() {
 // Web version - called from JavaScript
 extern "C" {
     EMSCRIPTEN_KEEPALIVE void handleMouseDown(uint8_t button, int x, int y) {
+        // Use printf for logging (single argument version)
+        printf("[C] handleMouseDown called\n");
         if (g_mouseHandler) {
             g_mouseHandler->OnMouseDown(button);
+            printf("[C] OnMouseDown called on handler\n");
+        } else {
+            printf("[C] ERROR: g_mouseHandler is null!\n");
         }
     }
     

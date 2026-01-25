@@ -54,6 +54,7 @@ namespace os {
 
 				bool mouseMove = false;
 				bool click = false;
+				bool mouseStartClick = false; // Flag for mouse click to start GUI (replaces 0x5b key)
 
 				common::uint8_t color;
 			public:

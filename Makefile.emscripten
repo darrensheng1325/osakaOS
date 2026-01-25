@@ -3,7 +3,7 @@
 EMCC = emcc
 EMCCFLAGS = -Iinclude -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 \
 	-s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","callMain"]' \
-	-s EXPORTED_FUNCTIONS='["_main","_malloc","_free","_kernelMain","_printf","_putcharTUI","_shouldContinueCLILoop","_setCLILoopActive","_shouldContinueGUILoop","_setGUILoopActive","_web_yield"]' \
+	-s EXPORTED_FUNCTIONS='["_main","_malloc","_free","_kernelMain","_printf","_putcharTUI","_shouldContinueCLILoop","_setCLILoopActive","_shouldContinueGUILoop","_setGUILoopActive","_web_yield","_handleMouseDown","_handleMouseUp","_handleMouseMove"]' \
 	-s INITIAL_MEMORY=67108864 \
 	-s STACK_SIZE=524288 \
 	-s USE_WEBGL2=0 \

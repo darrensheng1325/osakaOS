@@ -955,7 +955,16 @@ void DrawDesktopTask() {
 	Desktop* desktop = LoadDesktopForTask(false);
 	desktop->gc->SetMode(320, 200, 8);
 
-	while (1) { desktop->Draw(desktop->gc); }
+#ifdef __EMSCRIPTEN__
+	printf("[KERNEL] DrawDesktopTask started\n");
+#endif
+
+	while (1) { 
+		desktop->Draw(desktop->gc);
+#ifdef __EMSCRIPTEN__
+		emscripten_sleep(0); // Yield to browser event loop
+#endif
+	}
 }
 
 
@@ -1184,11 +1193,23 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	//kbhandler->OnKeyDown('\b');
 	//printf("\v");
 
-	printf("[KERNEL] Entering CLI loop (waiting for key 0x5b)\n");
+	printf("[KERNEL] Entering CLI loop (waiting for mouse click)\n");
 	// Note: custom printf only takes one argument, so we can't format the keyValue here
 
 	//this is the command line :D		
-	while (keyboard.handler->keyValue != 0x5b) { //0x5b = command/windows key	
+	// Wait for mouse click instead of 0x5b key
+#ifdef __EMSCRIPTEN__
+	printf("[KERNEL] Waiting for mouse click\n");
+#endif
+	while (!desktop.mouseStartClick) {
+#ifdef __EMSCRIPTEN__
+		// Check flag periodically and yield
+		if (desktop.mouseStartClick) {
+			printf("[KERNEL] Mouse click detected! Exiting CLI loop\n");
+			break;
+		}
+		emscripten_sleep(0); // Yield to allow mouse events to process
+#endif	
 
 		kbhandler->cli = true;
 
@@ -1210,6 +1231,8 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 		emscripten_sleep(1);
 #endif
 	}
+	// Reset the mouse start click flag
+	desktop.mouseStartClick = false;
 	kbhandler->cli = true;
 	kbhandler->gui = true;
 
@@ -1233,6 +1256,16 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	vga.FillRectangle(0, 0, 320, 200, 0x01); // Fill with blue
 	vga.DrawToScreen();
 	printf("[KERNEL] Test draw completed\n");
+	
+	// Force switch to graphics mode
+#ifdef __EMSCRIPTEN__
+	EM_ASM_({
+		if (Module.switchToGraphicsMode) {
+			Module.switchToGraphicsMode();
+			console.log('[JS] Forced switch to graphics mode');
+		}
+	});
+#endif
 	
 	//this is the gui :)
 	printf("[KERNEL] Entering GUI loop\n");

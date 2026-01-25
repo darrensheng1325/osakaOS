@@ -1,6 +1,12 @@
 #include <gui/desktop.h>
 #include <new>
 
+#ifdef __EMSCRIPTEN__
+extern "C" {
+    void printf(char* strChr);
+}
+#endif
+
 using namespace os;
 using namespace os::common;
 using namespace os::drivers;
@@ -182,11 +188,11 @@ void Desktop::FreeChild(Window* window) {
 
 void Desktop::Draw(common::GraphicsContext* gc) {
 	
-	if (this->keyValue == 0x5b) {
+	if (this->mouseStartClick) {
 
 		this->osaka->sim ^= 1;
 		this->OnMouseUp(0);
-		this->keyValue = 0;
+		this->mouseStartClick = false;
 	}
 	
 	
@@ -226,6 +232,14 @@ void Desktop::Draw(common::GraphicsContext* gc) {
 		
 	//write to video memory
 	gc->DrawToScreen();
+#ifdef __EMSCRIPTEN__
+	// Log first few draws to verify it's being called
+	static int drawCount = 0;
+	if (drawCount < 5) {
+		printf("[C] Desktop::Draw completed\n");
+		drawCount++;
+	}
+#endif
 }
 
 
@@ -383,9 +397,20 @@ void Desktop::Screenshot() {
 
 
 void Desktop::OnMouseDown(common::uint8_t button) {
+#ifdef __EMSCRIPTEN__
+	printf("[C] Desktop::OnMouseDown called\n");
+#endif
 
 	if (this->osaka->sim) { this->osaka->OnMouseDown(MouseX, MouseY, button);
 	} else {
+		// Set mouse start click flag (replaces 0x5b key)
+		if (button == 1) { // Left mouse button
+			this->mouseStartClick = true;
+#ifdef __EMSCRIPTEN__
+			printf("[C] mouseStartClick set to true!\n");
+#endif
+		}
+		
 		//left click after switching to sim and back
 		//and when there are 0 children (windows) causes crash
 		if (MouseY >= 190 && this->taskbar) {

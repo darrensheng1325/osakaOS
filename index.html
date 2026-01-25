@@ -6,70 +6,87 @@
     <title>osakaOS - Web Edition</title>
     <style>
         * {
-            box-sizing: border-box;
-        }
-        html, body {
             margin: 0;
             padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
             width: 100%;
             height: 100%;
+            margin: 0;
+            padding: 0;
             background: #000;
-            color: #aaa;
+            color: #0f0;
             font-family: monospace;
-            overflow: auto;
-        }
-        body {
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
+            overflow: hidden;
+            position: fixed;
         }
         
         #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+            overflow: hidden;
             display: flex;
-            flex-direction: column;
             align-items: center;
-            gap: 20px;
-            width: 100%;
-            max-width: 100%;
+            justify-content: center;
         }
+        
         h1 {
-            margin: 0;
-            padding: 10px;
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            font-size: 20px;
             color: #0f0;
+            pointer-events: none;
+        }
+        
+        #loading {
+            position: absolute;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            font-size: 18px;
+            color: #0f0;
+            pointer-events: none;
+        }
+        
+        #status {
+            position: absolute;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            font-size: 14px;
+            pointer-events: none;
         }
         
         #osaka-canvas {
-            border: 2px solid #333;
+            width: 100vw;
+            height: 100vh;
             image-rendering: pixelated;
             image-rendering: crisp-edges;
             background: #000;
-            display: block;
+            display: none; /* Hidden by default, shown when graphics mode is active */
+            object-fit: contain;
         }
         
         #osaka-text-canvas {
-            border: 2px solid #333;
+            width: 100vw;
+            height: 100vh;
             image-rendering: pixelated;
             image-rendering: crisp-edges;
             background: #000;
             display: block; /* Show text canvas by default */
-        }
-        
-        #status {
-            text-align: center;
-            font-size: 14px;
-        }
-        
-        #loading {
-            text-align: center;
-            font-size: 18px;
-            color: #0f0;
+            object-fit: contain;
         }
         
         .hidden {
-            display: none;
+            display: none !important;
         }
     </style>
 </head>
@@ -78,8 +95,8 @@
         <h1>osakaOS v2.1 - Web Edition</h1>
         <div id="loading">Loading osakaOS...</div>
         <div id="status" class="hidden"></div>
-        <canvas id="osaka-canvas" width="320" height="200" style="display: block;"></canvas>
-        <canvas id="osaka-text-canvas" width="640" height="400" style="display: block;"></canvas>
+        <canvas id="osaka-canvas" width="320" height="200"></canvas>
+        <canvas id="osaka-text-canvas" width="640" height="400"></canvas>
     </div>
     
     <!-- Fallback message if JS fails -->
@@ -178,7 +195,61 @@
                     console.log('[JS] safeReadAndPrintString is available');
                 }
                 if (!Module.renderPixels) {
-                    console.error('[JS] renderPixels missing after runtime init!');
+                    console.error('[JS] renderPixels missing after runtime init! Re-attaching...');
+                    // Re-attach renderPixels function
+                    Module.renderPixels = function(pixelPtr) {
+                        // Switch to graphics mode when rendering graphics
+                        if (Module.switchToGraphicsMode) {
+                            Module.switchToGraphicsMode();
+                            console.log('[JS] Switched to graphics mode (re-attached)');
+                        } else {
+                            console.error('[JS] switchToGraphicsMode not found (re-attached)!');
+                        }
+                        console.log('[JS] renderPixels called with pointer:', pixelPtr);
+                        var canvas = document.getElementById('osaka-canvas');
+                        if (!canvas) {
+                            console.error('[JS] Canvas not found!');
+                            return;
+                        }
+                        var ctx = canvas.getContext('2d');
+                        if (!ctx) {
+                            console.error('[JS] Could not get 2d context!');
+                            return;
+                        }
+                        var imageData = ctx.createImageData(320, 200);
+                        var data = imageData.data;
+                        var heapU8 = (typeof HEAPU8 !== 'undefined') ? HEAPU8 : window.HEAPU8;
+                        if (!heapU8) {
+                            console.error('[JS] No heap access available! HEAPU8 not found');
+                            return;
+                        }
+                        if (pixelPtr < 0 || pixelPtr + 64000 > heapU8.length) {
+                            console.error('[JS] renderPixels: pointer out of bounds', pixelPtr, 'heapSize:', heapU8.length);
+                            return;
+                        }
+                        var pixels = heapU8.subarray(pixelPtr, pixelPtr + 64000);
+                        for (var i = 0; i < 64000; i++) {
+                            var colorIndex = pixels[i];
+                            var r = 0, g = 0, b = 0;
+                            if (Module.ega_palette && Module.ega_palette[colorIndex]) {
+                                r = Module.ega_palette[colorIndex][0];
+                                g = Module.ega_palette[colorIndex][1];
+                                b = Module.ega_palette[colorIndex][2];
+                            } else {
+                                r = (colorIndex & 0xE0);
+                                g = ((colorIndex & 0x1C) << 3);
+                                b = ((colorIndex & 0x03) << 6);
+                            }
+                            var idx = i * 4;
+                            data[idx] = r;
+                            data[idx + 1] = g;
+                            data[idx + 2] = b;
+                            data[idx + 3] = 255;
+                        }
+                        ctx.putImageData(imageData, 0, 0);
+                        console.log('[JS] renderPixels: pixels rendered to canvas');
+                    };
+                    console.log('[JS] renderPixels re-attached');
                 } else {
                     console.log('[JS] renderPixels is available');
                 }
@@ -186,6 +257,9 @@
                     console.error('[JS] putCharTUI missing after runtime init! Re-attaching...');
                     // Re-attach putCharTUI
                     Module.putCharTUI = function(x, y, ch, fg, bg) {
+                        if (Module.switchToTextMode) {
+                            Module.switchToTextMode();
+                        }
                         var canvas = document.getElementById('osaka-text-canvas');
                         if (!canvas) return;
                         var ctx = canvas.getContext('2d');
@@ -212,6 +286,27 @@
                     console.log('[JS] putCharTUI re-attached');
                 } else {
                     console.log('[JS] putCharTUI is available');
+                }
+                
+                // Re-attach switchToGraphicsMode if missing
+                if (!Module.switchToGraphicsMode) {
+                    console.error('[JS] switchToGraphicsMode missing after runtime init! Re-attaching...');
+                    Module.switchToGraphicsMode = function() {
+                        var textCanvas = document.getElementById('osaka-text-canvas');
+                        var graphicsCanvas = document.getElementById('osaka-canvas');
+                        console.log('[JS] switchToGraphicsMode called (re-attached)');
+                        if (textCanvas && graphicsCanvas) {
+                            textCanvas.style.display = 'none';
+                            graphicsCanvas.style.display = 'block';
+                            console.log('[JS] Canvas switched: text hidden, graphics shown');
+                            console.log('[JS] Graphics canvas computed style:', window.getComputedStyle(graphicsCanvas).display);
+                        } else {
+                            console.error('[JS] Canvas elements not found!', {textCanvas, graphicsCanvas});
+                        }
+                    };
+                    console.log('[JS] switchToGraphicsMode re-attached');
+                } else {
+                    console.log('[JS] switchToGraphicsMode is available');
                 }
                 
                 var loading = document.getElementById('loading');
@@ -451,6 +546,14 @@
             },
             // Function to render pixels to canvas
             renderPixels: function(pixelPtr) {
+                // Switch to graphics mode when rendering graphics
+                if (Module.switchToGraphicsMode) {
+                    Module.switchToGraphicsMode();
+                    console.log('[JS] Switched to graphics mode');
+                } else {
+                    console.error('[JS] switchToGraphicsMode not found!');
+                }
+                
                 console.log('[JS] renderPixels called with pointer:', pixelPtr);
                 var canvas = document.getElementById('osaka-canvas');
                 if (!canvas) {
@@ -514,8 +617,38 @@
             }
         };
         
+        // Function to switch to text mode (show text canvas, hide graphics canvas)
+        Module.switchToTextMode = function() {
+            var textCanvas = document.getElementById('osaka-text-canvas');
+            var graphicsCanvas = document.getElementById('osaka-canvas');
+            if (textCanvas && graphicsCanvas) {
+                textCanvas.style.display = 'block';
+                graphicsCanvas.style.display = 'none';
+            }
+        };
+        
+        // Function to switch to graphics mode (show graphics canvas, hide text canvas)
+        Module.switchToGraphicsMode = function() {
+            var textCanvas = document.getElementById('osaka-text-canvas');
+            var graphicsCanvas = document.getElementById('osaka-canvas');
+            console.log('[JS] switchToGraphicsMode called');
+            if (textCanvas && graphicsCanvas) {
+                textCanvas.style.display = 'none';
+                graphicsCanvas.style.display = 'block';
+                console.log('[JS] Canvas switched: text hidden, graphics shown');
+                console.log('[JS] Graphics canvas computed style:', window.getComputedStyle(graphicsCanvas).display);
+            } else {
+                console.error('[JS] Canvas elements not found!', {textCanvas, graphicsCanvas});
+            }
+        };
+        
         // Function to render a character to text canvas
         Module.putCharTUI = function(x, y, ch, fg, bg) {
+            // Switch to text mode when rendering text
+            if (Module.switchToTextMode) {
+                Module.switchToTextMode();
+            }
+            
             var canvas = document.getElementById('osaka-text-canvas');
             if (!canvas) {
                 console.error('[JS] putCharTUI: canvas not found!');
