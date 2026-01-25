@@ -46,8 +46,13 @@ VideoGraphicsArray::VideoGraphicsArray() :
     memset(pixels, 0, sizeof(pixels));
     
     // Initialize default EGA palette - use the same calculation as the original VGA driver
-    // VGA writes 6-bit values (0-63) to palette registers, which need to be scaled to 8-bit (0-255)
-    // Scale factor: 255/63 ≈ 4.048, but we use 4 for exact match with QEMU
+    // VGA hardware (and QEMU) writes 6-bit values (0-63) to colorDataPort (port 0x3C9)
+    // QEMU decodes these 6-bit values to 8-bit RGB by multiplying by 4:
+    //   - 6-bit value 0 → 8-bit RGB 0
+    //   - 6-bit value 21 (0x15) → 8-bit RGB 84
+    //   - 6-bit value 42 (0x2a) → 8-bit RGB 168
+    //   - 6-bit value 63 (max) → 8-bit RGB 252
+    // This matches standard VGA hardware behavior: value * 4
     for (uint16_t color = 0; color < 256; color++) {
         uint8_t r6 = 0, g6 = 0, b6 = 0; // 6-bit values (0-63)
         uint8_t r = 0, g = 0, b = 0;    // 8-bit values (0-255)
@@ -87,10 +92,34 @@ VideoGraphicsArray::VideoGraphicsArray() :
                 break;
         }
         
-        ega_palette[color][0] = r;
-        ega_palette[color][1] = g;
-        ega_palette[color][2] = b;
+        // Store palette in RGB format: [Red, Green, Blue]
+        ega_palette[color][0] = r; // Red (0-255)
+        ega_palette[color][1] = g; // Green (0-255)
+        ega_palette[color][2] = b; // Blue (0-255)
     }
+    
+    // Export palette to JavaScript - copy the actual calculated values
+    EM_ASM_({
+        if (!Module.ega_palette) {
+            Module.ega_palette = [];
+        }
+        // Export the C++ calculated palette values to JavaScript
+        // This ensures JavaScript uses the exact same palette as C++
+        var palettePtr = $0;
+        var heapU8 = (typeof HEAPU8 !== 'undefined') ? HEAPU8 : window.HEAPU8;
+        if (heapU8 && palettePtr) {
+            for (var i = 0; i < 256; i++) {
+                var offset = i * 3;
+                var r = heapU8[palettePtr + offset];
+                var g = heapU8[palettePtr + offset + 1];
+                var b = heapU8[palettePtr + offset + 2];
+                Module.ega_palette[i] = new Array(r, g, b);
+            }
+            console.log('[C] Exported C++ palette to JavaScript. Color 0:', Module.ega_palette[0]);
+        } else {
+            console.error('[C] Could not export palette - heapU8 or palettePtr not available');
+        }
+    }, (uintptr_t)ega_palette);
 }
 
 VideoGraphicsArray::~VideoGraphicsArray() {
@@ -113,7 +142,75 @@ bool VideoGraphicsArray::SetMode(uint32_t width, uint32_t height, uint32_t color
     FrameBufferSegment = pixels;
     memset(pixels, 0, sizeof(pixels));
     
-    // Initialize palette (already done in constructor, but ensure it's set)
+    // Initialize palette - copy exact logic from native VGA driver
+    // This matches the native driver's SetMode palette initialization
+    // The native driver writes 6-bit values to colorDataPort.Write()
+    // QEMU decodes these by multiplying by 4 to get 8-bit RGB values
+    for (uint16_t color = 0; color < 256; color++) {
+        uint8_t r6 = 0, g6 = 0, b6 = 0; // 6-bit values (0-63) - what VGA hardware expects
+        uint8_t r = 0, g = 0, b = 0;    // 8-bit values (0-255) - for web canvas
+        
+        switch (color / 64) {
+            case 0:
+                // Native driver writes these 6-bit values directly to colorDataPort
+                r6 = (color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0);
+                g6 = (color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0);
+                b6 = (color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0);
+                // Scale 6-bit to 8-bit: multiply by 4
+                r = r6 * 4;
+                g = g6 * 4;
+                b = b6 * 4;
+                break;
+            case 1:
+                // Native driver: ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) >> 3
+                r6 = ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) >> 3;
+                g6 = ((color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0)) >> 3;
+                b6 = ((color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0)) >> 3;
+                r = r6 * 4;
+                g = g6 * 4;
+                b = b6 * 4;
+                break;
+            case 2:
+                // Native driver: ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) << 3
+                r6 = ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) << 3;
+                g6 = ((color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0)) << 3;
+                b6 = ((color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0)) << 3;
+                // Clamp to 63 (6-bit max) before scaling
+                if (r6 > 63) r6 = 63;
+                if (g6 > 63) g6 = 63;
+                if (b6 > 63) b6 = 63;
+                r = r6 * 4;
+                g = g6 * 4;
+                b = b6 * 4;
+                break;
+            default:
+                // Native driver writes 0, 0, 0
+                r = g = b = 0;
+                break;
+        }
+        
+        // Store palette in RGB format: [Red, Green, Blue]
+        ega_palette[color][0] = r; // Red (0-255)
+        ega_palette[color][1] = g; // Green (0-255)
+        ega_palette[color][2] = b; // Blue (0-255)
+    }
+    
+    // Export updated palette to JavaScript after SetMode
+    EM_ASM_({
+        var palettePtr = $0;
+        var heapU8 = (typeof HEAPU8 !== 'undefined') ? HEAPU8 : window.HEAPU8;
+        if (heapU8 && palettePtr && Module.ega_palette) {
+            for (var i = 0; i < 256; i++) {
+                var offset = i * 3;
+                var r = heapU8[palettePtr + offset];
+                var g = heapU8[palettePtr + offset + 1];
+                var b = heapU8[palettePtr + offset + 2];
+                Module.ega_palette[i] = new Array(r, g, b);
+            }
+            console.log('[C] Updated JavaScript palette after SetMode. Color 0:', Module.ega_palette[0]);
+        }
+    }, (uintptr_t)ega_palette);
+    
     return true;
 }
 
@@ -122,6 +219,13 @@ void VideoGraphicsArray::PaletteUpdate(uint8_t index, uint8_t r, uint8_t g, uint
         ega_palette[index][0] = r;
         ega_palette[index][1] = g;
         ega_palette[index][2] = b;
+        
+        // Update JavaScript palette when individual colors are changed
+        EM_ASM_({
+            if (Module.ega_palette && Module.ega_palette[$0] !== undefined) {
+                Module.ega_palette[$0] = new Array($1, $2, $3);
+            }
+        }, index, r, g, b);
     }
 }
 

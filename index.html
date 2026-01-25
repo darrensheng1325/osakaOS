@@ -117,6 +117,70 @@
     <script>
         // Test that JavaScript is running
         console.log('HTML loaded, initializing Module...');
+        // Initialize EGA palette early, before module loads
+        // This ensures the palette is available when rendering starts
+        function initializeEGAPalette() {
+            // Check if Module exists
+            if (typeof Module === 'undefined') {
+                console.log('[JS] Module not defined yet, skipping palette initialization');
+                return;
+            }
+            
+            if (!Module.ega_palette || Module.ega_palette.length === 0) {
+                Module.ega_palette = [];
+                
+                // Initialize EGA palette - use the same calculation as the original VGA driver
+                // VGA writes 6-bit values (0-63) to palette registers, which need to be scaled to 8-bit (0-255)
+                // Scale factor: 255/63 ≈ 4.048, but we use 4 for exact match with QEMU
+                for (var i = 0; i < 256; i++) {
+                    var r6 = 0, g6 = 0, b6 = 0; // 6-bit values (0-63)
+                    var r = 0, g = 0, b = 0;     // 8-bit values (0-255)
+                    switch (Math.floor(i / 64)) {
+                        case 0:
+                            r6 = (i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0);
+                            g6 = (i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0);
+                            b6 = (i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0);
+                            // Scale 6-bit to 8-bit: multiply by 4
+                            r = r6 * 4;
+                            g = g6 * 4;
+                            b = b6 * 4;
+                            break;
+                        case 1:
+                            r6 = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) >> 3;
+                            g6 = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) >> 3;
+                            b6 = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) >> 3;
+                            r = r6 * 4;
+                            g = g6 * 4;
+                            b = b6 * 4;
+                            break;
+                        case 2:
+                            r6 = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) << 3;
+                            g6 = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) << 3;
+                            b6 = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) << 3;
+                            // Clamp to 63 (6-bit max) before scaling
+                            if (r6 > 63) r6 = 63;
+                            if (g6 > 63) g6 = 63;
+                            if (b6 > 63) b6 = 63;
+                            r = r6 * 4;
+                            g = g6 * 4;
+                            b = b6 * 4;
+                            break;
+                        default:
+                            r = g = b = 0;
+                            break;
+                    }
+                    // Store palette in RGB format: [Red, Green, Blue]
+                    Module.ega_palette[i] = [r, g, b];
+                }
+                
+                // Debug: verify color 0 is black
+                console.log('[JS] EGA palette initialized early. Color 0 (black):', Module.ega_palette[0]);
+                if (Module.ega_palette[0][0] !== 0 || Module.ega_palette[0][1] !== 0 || Module.ega_palette[0][2] !== 0) {
+                    console.error('[JS] ERROR: Color 0 is not black!', Module.ega_palette[0]);
+                }
+            }
+        }
+        
         document.addEventListener('DOMContentLoaded', function() {
             console.log('DOM loaded');
         });
@@ -147,6 +211,8 @@
         var Module = {
             preRun: [],
             postRun: [],
+            // Initialize EGA palette array
+            ega_palette: [],
             onRuntimeInitialized: function() {
                 console.log('[JS] Emscripten runtime initialized');
                 
@@ -257,11 +323,12 @@
                                 g = ((colorIndex & 0x1C) << 3);
                                 b = ((colorIndex & 0x03) << 6);
                             }
+                            // ImageData format: RGBA (Red, Green, Blue, Alpha) - 4 bytes per pixel
                             var idx = i * 4;
-                            data[idx] = r;
-                            data[idx + 1] = g;
-                            data[idx + 2] = b;
-                            data[idx + 3] = 255;
+                            data[idx] = r;     // Red (0-255)
+                            data[idx + 1] = g; // Green (0-255)
+                            data[idx + 2] = b; // Blue (0-255)
+                            data[idx + 3] = 255; // Alpha (opacity, 255 = fully opaque)
                         }
                         ctx.putImageData(imageData, 0, 0);
                         console.log('[JS] renderPixels: pixels rendered to canvas');
@@ -611,10 +678,11 @@
                     var r = 0, g = 0, b = 0;
                     
                     // Use EGA palette if available
+                    // Palette format: [Red, Green, Blue]
                     if (Module.ega_palette && Module.ega_palette[colorIndex]) {
-                        r = Module.ega_palette[colorIndex][0];
-                        g = Module.ega_palette[colorIndex][1];
-                        b = Module.ega_palette[colorIndex][2];
+                        r = Module.ega_palette[colorIndex][0]; // Red
+                        g = Module.ega_palette[colorIndex][1]; // Green
+                        b = Module.ega_palette[colorIndex][2]; // Blue
                     } else {
                         // Fallback: simple color mapping
                         r = (colorIndex & 0xE0);
@@ -912,25 +980,51 @@
                 var colorIdx = pixels[i];
                 var rVal = 0, gVal = 0, bVal = 0;
                 
-                if (Module.ega_palette && Module.ega_palette[colorIdx]) {
-                    rVal = Module.ega_palette[colorIdx][0];
-                    gVal = Module.ega_palette[colorIdx][1];
-                    bVal = Module.ega_palette[colorIdx][2];
+                // Palette format: [Red, Green, Blue]
+                if (Module.ega_palette && Module.ega_palette[colorIdx] && Array.isArray(Module.ega_palette[colorIdx])) {
+                    rVal = Module.ega_palette[colorIdx][0]; // Red
+                    gVal = Module.ega_palette[colorIdx][1]; // Green
+                    bVal = Module.ega_palette[colorIdx][2]; // Blue
                 } else {
+                    console.log('[JS] Fallback: calculating color on the fly');
+                    // Fallback: calculate color on the fly (shouldn't happen if palette is initialized)
                     var color = colorIdx;
-                    var div = Math.floor(color / 64);
-                    if (div === 0) {
-                        rVal = (color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0);
-                        gVal = (color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0);
-                        bVal = (color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0);
+                    var r6 = 0, g6 = 0, b6 = 0;
+                    switch (Math.floor(color / 64)) {
+                        case 0:
+                            r6 = (color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0);
+                            g6 = (color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0);
+                            b6 = (color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0);
+                            break;
+                        case 1:
+                            r6 = ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) >> 3;
+                            g6 = ((color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0)) >> 3;
+                            b6 = ((color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0)) >> 3;
+                            break;
+                        case 2:
+                            r6 = ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) << 3;
+                            g6 = ((color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0)) << 3;
+                            b6 = ((color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0)) << 3;
+                            if (r6 > 63) r6 = 63;
+                            if (g6 > 63) g6 = 63;
+                            if (b6 > 63) b6 = 63;
+                            break;
+                        default:
+                            r6 = g6 = b6 = 0;
+                            break;
                     }
+                    // Scale 6-bit to 8-bit
+                    rVal = r6 * 4;
+                    gVal = g6 * 4;
+                    bVal = b6 * 4;
                 }
                 
+                // ImageData format: RGBA (Red, Green, Blue, Alpha) - 4 bytes per pixel
                 var idx = i * 4;
-                data[idx] = rVal;
-                data[idx + 1] = gVal;
-                data[idx + 2] = bVal;
-                data[idx + 3] = 255;
+                data[idx] = rVal;     // Red (0-255)
+                data[idx + 1] = gVal; // Green (0-255)
+                data[idx + 2] = bVal; // Blue (0-255)
+                data[idx + 3] = 255;  // Alpha (opacity, 255 = fully opaque)
             }
             
             ctx.putImageData(imageData, 0, 0);
@@ -940,6 +1034,11 @@
         // Initialize EGA palette - use the same calculation as the original VGA driver
         // VGA writes 6-bit values (0-63) to palette registers, which need to be scaled to 8-bit (0-255)
         // Scale factor: 255/63 ≈ 4.048, but we use 4 for exact match with QEMU
+        // Ensure palette array exists
+        if (!Module.ega_palette || Module.ega_palette.length === 0) {
+            Module.ega_palette = [];
+        }
+        
         for (var i = 0; i < 256; i++) {
             var r6 = 0, g6 = 0, b6 = 0; // 6-bit values (0-63)
             var r = 0, g = 0, b = 0;     // 8-bit values (0-255)
@@ -978,6 +1077,12 @@
                     break;
             }
             Module.ega_palette[i] = [r, g, b];
+        }
+        
+        // Debug: verify color 0 is black
+        console.log('[JS] EGA palette initialized. Color 0 (black):', Module.ega_palette[0]);
+        if (Module.ega_palette[0][0] !== 0 || Module.ega_palette[0][1] !== 0 || Module.ega_palette[0][2] !== 0) {
+            console.error('[JS] ERROR: Color 0 is not black!', Module.ega_palette[0]);
         }
         
         // Setup canvas scaling
@@ -1061,40 +1166,57 @@
         };
         document.head.appendChild(script);
         
+        // Initialize palette after Module is defined
+        if (typeof Module !== 'undefined') {
+            initializeEGAPalette();
+        }
+        
         // Track module initialization - wait for Module to be defined
         var moduleInitialized = false;
-        var originalOnRuntimeInitialized = Module.onRuntimeInitialized; // Capture it NOW, before script loads
+        var originalOnRuntimeInitialized = null;
+        
+        // Capture the original onRuntimeInitialized safely
+        if (typeof Module !== 'undefined' && Module.onRuntimeInitialized) {
+            originalOnRuntimeInitialized = Module.onRuntimeInitialized;
+        }
         
         // Wrap the onRuntimeInitialized to add logging
-        Module.onRuntimeInitialized = function() {
-            console.log('[JS] onRuntimeInitialized wrapper called');
-            console.log('[JS] Module state - _kernelMain:', typeof Module._kernelMain, 'HEAPU8:', typeof HEAPU8);
-            moduleInitialized = true;
-            
-            // Always call the original - it has the kernel startup code
-            if (originalOnRuntimeInitialized) {
-                console.log('[JS] Calling original onRuntimeInitialized (has kernel startup code)...');
-                originalOnRuntimeInitialized();
-            } else {
-                console.error('[JS] ERROR: originalOnRuntimeInitialized is undefined!');
-                console.error('[JS] This should not happen - the kernel startup code is missing!');
-                // Fallback: try to start kernel directly
-                if (Module._kernelMain && typeof HEAPU8 !== 'undefined') {
-                    console.log('[JS] Attempting to start kernel directly as fallback...');
-                    try {
-                        var fakeMultiboot = Module._malloc(16 * 4);
-                        var heap = new Uint32Array(HEAPU8.buffer, fakeMultiboot, 16);
-                        heap[0] = 0;
-                        heap[1] = 0x800000;
-                        Module._kernelMain(fakeMultiboot, 0x2BADB002);
-                        console.log('[JS] Fallback kernel start succeeded');
-                    } catch (e) {
-                        console.error('[JS] Fallback kernel start failed:', e);
-                        console.error('[JS] Stack:', e.stack);
+        if (typeof Module !== 'undefined') {
+            Module.onRuntimeInitialized = function() {
+                console.log('[JS] onRuntimeInitialized wrapper called');
+                console.log('[JS] Module state - _kernelMain:', typeof Module._kernelMain, 'HEAPU8:', typeof HEAPU8);
+                moduleInitialized = true;
+                
+                // Re-initialize palette in case it was overwritten
+                initializeEGAPalette();
+                
+                // Always call the original - it has the kernel startup code
+                if (originalOnRuntimeInitialized) {
+                    console.log('[JS] Calling original onRuntimeInitialized (has kernel startup code)...');
+                    originalOnRuntimeInitialized();
+                } else {
+                    console.error('[JS] ERROR: originalOnRuntimeInitialized is undefined!');
+                    console.error('[JS] This should not happen - the kernel startup code is missing!');
+                    // Fallback: try to start kernel directly
+                    if (Module._kernelMain && typeof HEAPU8 !== 'undefined') {
+                        console.log('[JS] Attempting to start kernel directly as fallback...');
+                        try {
+                            var fakeMultiboot = Module._malloc(16 * 4);
+                            var heap = new Uint32Array(HEAPU8.buffer, fakeMultiboot, 16);
+                            heap[0] = 0;
+                            heap[1] = 0x800000;
+                            Module._kernelMain(fakeMultiboot, 0x2BADB002);
+                            console.log('[JS] Fallback kernel start succeeded');
+                        } catch (e) {
+                            console.error('[JS] Fallback kernel start failed:', e);
+                            console.error('[JS] Stack:', e.stack);
+                        }
                     }
                 }
-            }
-        };
+            };
+        } else {
+            console.error('[JS] Module is undefined! Cannot initialize palette or wrap onRuntimeInitialized');
+        }
         
         // Fallback if module doesn't load
         setTimeout(function() {
