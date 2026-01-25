@@ -1278,8 +1278,15 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 		//			      / \
 	
 #ifdef __EMSCRIPTEN__
+		// For Emscripten, directly call desktop draw since task manager
+		// relies on timer interrupts which don't work the same way
+		// The desktop draw will yield via emscripten_sleep internally
+		desktop.Draw(desktop.gc);
 		// Yield to browser event loop to prevent blocking
 		emscripten_sleep(0);
+#else
+		// Original x86 version relies on task manager
+		// which is scheduled via timer interrupts
 #endif
 	}
 }
