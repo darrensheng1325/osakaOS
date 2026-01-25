@@ -988,6 +988,10 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 #ifdef __EMSCRIPTEN__
 	// Yield early to allow page to render
 	// emscripten_sleep(0);
+	EM_ASM({
+		document.getElementById('title').textContent = '';
+		document.getElementById('loading').textContent = '';
+	});
 #endif
 
 	// Initialize GDT first
