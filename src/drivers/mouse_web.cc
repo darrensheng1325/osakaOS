@@ -89,27 +89,36 @@ MouseDriver::MouseDriver(InterruptManager* manager, MouseEventHandler* handler)
                 
                 var x, y;
                 
-                // Always use actual click coordinates for clicks
-                // Pointer lock affects movement, not click position
-                var rect = canvas.getBoundingClientRect();
-                x = e.clientX - rect.left;
-                y = e.clientY - rect.top;
-                
-                // Scale coordinates
-                if (isTextCanvas) {
-                    // Text canvas is 640x400, scale to 320x200
-                    x = Math.floor(x * 320 / rect.width);
-                    y = Math.floor(y * 200 / rect.height);
+                // When pointer lock is active, e.clientX/Y might reflect the center position
+                // where the browser moved the cursor, not the actual click position.
+                // In this case, use the current tracked position instead.
+                if (isPointerLocked && !isTextCanvas) {
+                    // Use current tracked position when pointer locked
+                    // The click happened at the current mouse position
+                    x = Module._lastMouseX || 160;
+                    y = Module._lastMouseY || 100;
+                    console.log('[JS] Pointer locked - using tracked position:', x, y);
                 } else {
-                    // Graphics canvas is 320x200
-                    x = Math.floor(x * 320 / rect.width);
-                    y = Math.floor(y * 200 / rect.height);
+                    // Use actual click coordinates when not pointer locked
+                    var rect = canvas.getBoundingClientRect();
+                    x = e.clientX - rect.left;
+                    y = e.clientY - rect.top;
+                    
+                    // Scale coordinates
+                    if (isTextCanvas) {
+                        // Text canvas is 640x400, scale to 320x200
+                        x = Math.floor(x * 320 / rect.width);
+                        y = Math.floor(y * 200 / rect.height);
+                    } else {
+                        // Graphics canvas is 320x200
+                        x = Math.floor(x * 320 / rect.width);
+                        y = Math.floor(y * 200 / rect.height);
+                    }
+                    
+                    // Update tracked position with actual click coordinates
+                    Module._lastMouseX = x;
+                    Module._lastMouseY = y;
                 }
-                
-                // Always update tracked position on click
-                // This ensures the mouse position is accurate even when pointer locked
-                Module._lastMouseX = x;
-                Module._lastMouseY = y;
                 
                 // Request pointer lock after setting position (only for graphics canvas)
                 // Only request if not already locked
@@ -233,20 +242,11 @@ extern "C" {
                 if (y < 0) y = 0;
                 if (y >= 200) y = 199;
                 
-                // Calculate relative movement from current position to click position
-                int dx = (int)x - (int)desktop->MouseX;
-                int dy = (int)y - (int)desktop->MouseY;
-                
-                // Only move if there's actual movement needed
-                // This ensures the mouse position is set correctly on click
-                if (dx != 0 || dy != 0) {
-                    g_mouseHandler->OnMouseMove(dx, dy);
-                } else {
-                    // If already at the click position, ensure MouseX/MouseY are set correctly
-                    // This handles the case where MouseX/MouseY might be out of sync
-                    desktop->MouseX = x;
-                    desktop->MouseY = y;
-                }
+                // Directly set the mouse position to the click coordinates
+                // This ensures the mouse is at the correct position when clicking
+                // Don't use relative movement - just set the absolute position
+                desktop->MouseX = x;
+                desktop->MouseY = y;
             } else {
                 // If not Desktop, try to move to position (for other handlers)
                 // This assumes current position is at center (160, 100) for 320x200
