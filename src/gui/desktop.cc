@@ -1,7 +1,7 @@
 #include <gui/desktop.h>
 #include <new>
-
 #ifdef __EMSCRIPTEN__
+#include <app/iframe.h>
 extern "C" {
     void printf(char* strChr);
 }
@@ -110,6 +110,18 @@ CompositeWidget* Desktop::CreateChild(uint8_t appType, char* name, App* oldApp) 
 			color = 0x3f;
 			}
 			break;
+#ifdef __EMSCRIPTEN__
+		//iframe (web only)
+		case 4:
+			{
+			// URL is passed in the name parameter
+			IframeApp* iframeApp = (IframeApp*)memoryManager->malloc(sizeof(IframeApp));
+			new (iframeApp) IframeApp(name);
+			app = iframeApp;
+			color = 0x3f;
+			}
+			break;
+#endif
 		//create command line
 		//as deafult
 		default:
@@ -130,7 +142,14 @@ CompositeWidget* Desktop::CreateChild(uint8_t appType, char* name, App* oldApp) 
 
 	//create window
 	Window* window = (Window*)memoryManager->malloc(sizeof(Window));
-	new (window) Window(this, prng()%140, prng()%120, 180, 80, name, color, app, this->filesystem);
+	int32_t windowW = 180;
+	int32_t windowH = 80;
+	// For iframe apps, use a larger window
+	if (appType == 4) {
+		windowW = 200;
+		windowH = 120;
+	}
+	new (window) Window(this, prng()%140, prng()%120, windowW, windowH, name, color, app, this->filesystem);
 	//new (window) Window(this, 70, 50, 180, 80, name, color, app, this->filesystem);
 	
 

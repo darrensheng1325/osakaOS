@@ -225,6 +225,24 @@
                     textCanvas.focus();
                 }
                 
+                // Re-attach iframe functions in case Emscripten overwrote Module
+                if (typeof window.setupIframeAppFunction !== 'undefined') {
+                    Module.setupIframeApp = window.setupIframeAppFunction;
+                    console.log('[JS] Re-attached setupIframeApp');
+                }
+                if (typeof window.captureIframeToBufferFunction !== 'undefined') {
+                    Module.captureIframeToBuffer = window.captureIframeToBufferFunction;
+                    console.log('[JS] Re-attached captureIframeToBuffer');
+                }
+                if (typeof window.forwardKeyToIframeFunction !== 'undefined') {
+                    Module.forwardKeyToIframe = window.forwardKeyToIframeFunction;
+                    console.log('[JS] Re-attached forwardKeyToIframe');
+                }
+                if (typeof window.forwardMouseToIframeFunction !== 'undefined') {
+                    Module.forwardMouseToIframe = window.forwardMouseToIframeFunction;
+                    console.log('[JS] Re-attached forwardMouseToIframe');
+                }
+                
                 // Ensure safeReadAndPrintString and renderPixels are still available
                 // (Emscripten might have replaced the Module object)
                 if (!Module.safeReadAndPrintString) {
@@ -1084,6 +1102,343 @@
         if (Module.ega_palette[0][0] !== 0 || Module.ega_palette[0][1] !== 0 || Module.ega_palette[0][2] !== 0) {
             console.error('[JS] ERROR: Color 0 is not black!', Module.ega_palette[0]);
         }
+        
+        // Iframe app helper functions - store in window for re-attachment
+        window.setupIframeAppFunction = function(urlPtr, iframeId, widgetX, widgetY, widgetW, widgetH) {
+            console.log('[IframeApp JS] setupIframeApp called', {
+                urlPtr: urlPtr,
+                iframeId: iframeId,
+                widgetX: widgetX,
+                widgetY: widgetY,
+                widgetW: widgetW,
+                widgetH: widgetH
+            });
+            
+            // Read URL from WASM memory
+            var url = '';
+            if (urlPtr) {
+                var heapU8 = (typeof HEAPU8 !== 'undefined') ? HEAPU8 : window.HEAPU8;
+                if (heapU8) {
+                    var i = 0;
+                    while (heapU8[urlPtr + i] !== 0 && i < 256) {
+                        url += String.fromCharCode(heapU8[urlPtr + i]);
+                        i++;
+                    }
+                }
+            }
+            
+            console.log('[IframeApp JS] URL read:', url);
+            
+            var iframeIdStr = 'osaka_iframe_' + iframeId;
+            var captureCanvasId = 'osaka_capture_' + iframeId;
+            
+            // Remove existing elements
+            var existingIframe = document.getElementById(iframeIdStr);
+            if (existingIframe) existingIframe.parentNode.removeChild(existingIframe);
+            var existingCanvas = document.getElementById(captureCanvasId);
+            if (existingCanvas) existingCanvas.parentNode.removeChild(existingCanvas);
+            
+            // Create hidden iframe
+            var iframe = document.createElement('iframe');
+            iframe.id = iframeIdStr;
+            iframe.src = url;
+            iframe.style.position = 'absolute';
+            iframe.style.left = '-9999px';
+            iframe.style.top = '-9999px';
+            iframe.style.width = widgetW + 'px';
+            iframe.style.height = widgetH + 'px';
+            iframe.style.border = 'none';
+            iframe.style.visibility = 'hidden';
+            
+            // Create capture canvas
+            var captureCanvas = document.createElement('canvas');
+            captureCanvas.id = captureCanvasId;
+            captureCanvas.width = widgetW;
+            captureCanvas.height = widgetH;
+            captureCanvas.style.position = 'absolute';
+            captureCanvas.style.left = '-9999px';
+            captureCanvas.style.top = '-9999px';
+            
+            document.body.appendChild(iframe);
+            document.body.appendChild(captureCanvas);
+            
+            // Store app reference
+            if (!Module.iframeApps) {
+                Module.iframeApps = {};
+            }
+            Module.iframeApps[iframeId] = {
+                iframe: iframe,
+                captureCanvas: captureCanvas,
+                widgetX: widgetX,
+                widgetY: widgetY,
+                widgetW: widgetW,
+                widgetH: widgetH
+            };
+            
+            // Start capture when iframe loads
+            iframe.onload = function() {
+                console.log('[IframeApp JS] Iframe loaded:', url);
+                var captureFrame = function() {
+                    console.log('[IframeApp JS] captureFrame called');
+                    try {
+                        var app = Module.iframeApps[iframeId];
+                        if (!app || !app.iframe || !app.captureCanvas) return;
+                        
+                        var ctx = app.captureCanvas.getContext('2d');
+                        try {
+                            // Try to capture iframe content
+                            var iframeDoc = app.iframe.contentDocument || app.iframe.contentWindow.document;
+                            if (iframeDoc && iframeDoc.body) {
+                                // Same-origin: try to capture using html2canvas if available
+                                if (typeof html2canvas !== 'undefined') {
+                                    html2canvas(iframeDoc.body, {
+                                        canvas: app.captureCanvas,
+                                        width: app.widgetW,
+                                        height: app.widgetH,
+                                        scale: 1,
+                                        useCORS: true
+                                    }).then(function(canvas) {
+                                        // Canvas is already updated
+                                    }).catch(function(e) {
+                                        console.log('[IframeApp] html2canvas error:', e);
+                                        // Fallback: draw placeholder
+                                        ctx.fillStyle = '#333';
+                                        ctx.fillRect(0, 0, app.widgetW, app.widgetH);
+                                        ctx.fillStyle = '#fff';
+                                        ctx.font = '12px monospace';
+                                        ctx.fillText('Capture failed', 10, 20);
+                                    });
+                                } else {
+                                    // No html2canvas: try direct drawImage (only works for same-origin, no CORS)
+                                    try {
+                                        ctx.drawImage(app.iframe, 0, 0, app.widgetW, app.widgetH);
+                                    } catch(e) {
+                                        // Fallback: render iframe body to canvas manually
+                                        // This is a simplified approach - just draw a placeholder
+                                        ctx.fillStyle = '#333';
+                                        ctx.fillRect(0, 0, app.widgetW, app.widgetH);
+                                        ctx.fillStyle = '#fff';
+                                        ctx.font = '12px monospace';
+                                        ctx.fillText('Iframe loaded', 10, 20);
+                                        ctx.fillText('(Use html2canvas for', 10, 35);
+                                        ctx.fillText('better capture)', 10, 50);
+                                    }
+                                }
+                            } else {
+                                // Cross-origin - can't access document
+                                ctx.fillStyle = '#333';
+                                ctx.fillRect(0, 0, app.widgetW, app.widgetH);
+                                ctx.fillStyle = '#fff';
+                                ctx.font = '12px monospace';
+                                ctx.fillText('Cross-origin', 10, 20);
+                                ctx.fillText('Cannot capture', 10, 35);
+                            }
+                        } catch(e) {
+                            console.log('[IframeApp] Capture error:', e);
+                            // Fill with error message
+                            ctx.fillStyle = '#333';
+                            ctx.fillRect(0, 0, app.widgetW, app.widgetH);
+                            ctx.fillStyle = '#f00';
+                            ctx.font = '12px monospace';
+                            ctx.fillText('Capture error', 10, 20);
+                        }
+                    } catch(e) {
+                        console.log('[IframeApp] Frame capture error:', e);
+                    }
+                };
+                
+                // Start capture loop
+                Module.iframeApps[iframeId].captureInterval = setInterval(captureFrame, 100);
+                // Also capture immediately
+                captureFrame();
+            };
+        };
+        
+        // Attach to Module initially
+        Module.setupIframeApp = window.setupIframeAppFunction;
+        
+        // Store in window for re-attachment
+        window.captureIframeToBufferFunction = function(iframeId, offsetX, offsetY, contentW, contentH, bufferPtr) {
+            console.log('[IframeApp JS] captureIframeToBuffer called', {
+                iframeId: iframeId,
+                offsetX: offsetX,
+                offsetY: offsetY,
+                contentW: contentW,
+                contentH: contentH,
+                bufferPtr: bufferPtr
+            });
+            
+            var app = Module.iframeApps ? Module.iframeApps[iframeId] : null;
+            if (!app || !app.captureCanvas || !bufferPtr) {
+                console.error('[IframeApp JS] captureIframeToBuffer: missing app/canvas/buffer', {
+                    hasApp: !!app,
+                    hasCanvas: app ? !!app.captureCanvas : false,
+                    bufferPtr: bufferPtr,
+                    iframeApps: Module.iframeApps
+                });
+                return;
+            }
+            
+            console.log('[IframeApp JS] App found, proceeding with capture');
+            
+            var captureCanvas = app.captureCanvas;
+            var ctx = captureCanvas.getContext('2d');
+            
+            // Check if canvas has any content
+            var imageData = ctx.getImageData(0, 0, app.widgetW, app.widgetH);
+            var data = imageData.data;
+            
+            // Check if canvas is all white/empty
+            var hasContent = false;
+            for (var i = 0; i < data.length; i += 4) {
+                if (data[i] !== 255 || data[i+1] !== 255 || data[i+2] !== 255) {
+                    hasContent = true;
+                    break;
+                }
+            }
+            
+            if (!hasContent) {
+                console.log('[IframeApp JS] Canvas is empty, drawing placeholder');
+                // Canvas is empty/white - fill with a test pattern to verify buffer writing works
+                ctx.fillStyle = '#444';
+                ctx.fillRect(0, 0, app.widgetW, app.widgetH);
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px monospace';
+                ctx.fillText('Loading iframe...', 10, 20);
+                ctx.fillText('Size: ' + app.widgetW + 'x' + app.widgetH, 10, 35);
+                // Re-read image data after drawing
+                imageData = ctx.getImageData(0, 0, app.widgetW, app.widgetH);
+                data = imageData.data;
+            }
+            
+            var heapU8 = (typeof HEAPU8 !== 'undefined') ? HEAPU8 : window.HEAPU8;
+            if (!heapU8) {
+                console.error('[IframeApp] HEAPU8 not available');
+                return;
+            }
+            
+            // Convert captured pixels to OS palette and write to buffer
+            // The buffer is 320x200, and we write starting at (offsetX, offsetY) with size (contentW, contentH)
+            // The buffer index calculation is: (y << 8) + (y << 6) + x = y * 320 + x
+            var pixelsWritten = 0;
+            var maxX = Math.min(contentW, app.widgetW);
+            var maxY = Math.min(contentH, app.widgetH);
+            
+            for (var y = 0; y < maxY && (offsetY + y) < 200; y++) {
+                for (var x = 0; x < maxX && (offsetX + x) < 320; x++) {
+                    var srcIdx = (y * app.widgetW + x) * 4;
+                    var r = data[srcIdx];
+                    var g = data[srcIdx + 1];
+                    var b = data[srcIdx + 2];
+                    
+                    // Find closest EGA palette color
+                    var bestColor = 0;
+                    var bestDist = Infinity;
+                    
+                    if (Module.ega_palette) {
+                        for (var i = 0; i < 256; i++) {
+                            var palR = Module.ega_palette[i][0];
+                            var palG = Module.ega_palette[i][1];
+                            var palB = Module.ega_palette[i][2];
+                            
+                            var dist = Math.sqrt(
+                                Math.pow(r - palR, 2) +
+                                Math.pow(g - palG, 2) +
+                                Math.pow(b - palB, 2)
+                            );
+                            
+                            if (dist < bestDist) {
+                                bestDist = dist;
+                                bestColor = i;
+                            }
+                        }
+                    }
+                    
+                    // Write to window buffer at (offsetX + x, offsetY + y)
+                    var bufX = offsetX + x;
+                    var bufY = offsetY + y;
+                    if (bufX >= 0 && bufX < 320 && bufY >= 0 && bufY < 200) {
+                        // Buffer index calculation: (bufY << 8) + (bufY << 6) + bufX = bufY * 320 + bufX
+                        var bufIdx = (bufY << 8) + (bufY << 6) + bufX;
+                        if (bufferPtr + bufIdx < heapU8.length) {
+                            heapU8[bufferPtr + bufIdx] = bestColor;
+                            pixelsWritten++;
+                        }
+                    }
+                }
+            }
+            
+            console.log('[IframeApp JS] Wrote', pixelsWritten, 'pixels to buffer');
+            
+            if (pixelsWritten === 0) {
+                console.error('[IframeApp JS] No pixels written!', {
+                    offsetX: offsetX,
+                    offsetY: offsetY,
+                    contentW: contentW,
+                    contentH: contentH,
+                    bufferPtr: bufferPtr,
+                    heapSize: heapU8.length,
+                    widgetW: app.widgetW,
+                    widgetH: app.widgetH
+                });
+            }
+        };
+        
+        // Attach to Module initially
+        Module.captureIframeToBuffer = window.captureIframeToBufferFunction;
+        
+        // Store in window for re-attachment
+        window.forwardKeyToIframeFunction = function(iframeId, keyCode, eventType) {
+            var app = Module.iframeApps ? Module.iframeApps[iframeId] : null;
+            if (!app || !app.iframe) return;
+            
+            try {
+                var iframeWindow = app.iframe.contentWindow;
+                if (iframeWindow) {
+                    var keyEvent = new KeyboardEvent(eventType, {
+                        keyCode: keyCode,
+                        which: keyCode,
+                        bubbles: true,
+                        cancelable: true
+                    });
+                    iframeWindow.dispatchEvent(keyEvent);
+                }
+            } catch(e) {
+                // Cross-origin restriction
+            }
+        };
+        
+        // Attach to Module initially
+        Module.forwardKeyToIframe = window.forwardKeyToIframeFunction;
+        
+        // Store in window for re-attachment
+        window.forwardMouseToIframeFunction = function(iframeId, mouseX, mouseY, button, widgetX, widgetY, eventType) {
+            var app = Module.iframeApps ? Module.iframeApps[iframeId] : null;
+            if (!app || !app.iframe) return;
+            
+            try {
+                var iframeWindow = app.iframe.contentWindow;
+                var iframeDoc = app.iframe.contentDocument || iframeWindow.document;
+                if (!iframeDoc) return;
+                
+                var iframeX = mouseX - widgetX;
+                var iframeY = mouseY - widgetY;
+                
+                var mouseEvent = new MouseEvent(eventType, {
+                    clientX: iframeX,
+                    clientY: iframeY,
+                    button: button,
+                    bubbles: true,
+                    cancelable: true
+                });
+                iframeDoc.dispatchEvent(mouseEvent);
+            } catch(e) {
+                // Cross-origin restriction
+            }
+        };
+        
+        // Attach to Module initially
+        Module.forwardMouseToIframe = window.forwardMouseToIframeFunction;
         
         // Setup canvas scaling
         window.addEventListener('load', function() {

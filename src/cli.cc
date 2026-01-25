@@ -1,6 +1,9 @@
 #include <cli.h>
 #include <script.h>
 #include <new>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 
 using namespace os;
@@ -696,6 +699,33 @@ void journal(char* args, CommandLine* cli) {
 	else { cli->PrintCommand("This command is not available in text mode.\n"); }
 }
 
+#ifdef __EMSCRIPTEN__
+void iframe(char* args, CommandLine* cli) {
+	// Extract URL from args
+	char* url = argparse(args, 0);
+	
+	if (strlen(url) < 1) {
+		cli->PrintCommand("Usage: iframe <url>\n");
+		cli->PrintCommand("Example: iframe https://example.com\n");
+		return;
+	}
+	
+	if (cli->gui) {
+		// Create a window inside the OS with the URL as the window name
+		// The IframeApp will extract the URL from the name
+		cli->appWindow->parent->CreateChild(4, url, 0);
+		cli->PrintCommand("Opening iframe window: ");
+		cli->PrintCommand(url);
+		cli->PrintCommand("\n");
+	} else {
+		cli->PrintCommand("This command is not available in text mode.\n");
+	}
+}
+#else
+void iframe(char* args, CommandLine* cli) {
+	cli->PrintCommand("This command is only available in the web version.\n");
+}
+#endif
 
 void window(char* args, CommandLine* cli) {
 		
@@ -1670,7 +1700,6 @@ void dad(char* args, CommandLine* cli) {
 	}
 }
 
-
 CommandLine::CommandLine(GlobalDescriptorTable* gdt, 
 			TaskManager* tm, 
 			MemoryManager* mm,
@@ -1835,6 +1864,7 @@ void CommandLine::hash_cli_init() {
 	this->hash_add("terminal", terminal);
 	this->hash_add("kasugapaint", kasugapaint);
 	this->hash_add("journal", journal);
+	this->hash_add("iframe", iframe);
 	this->hash_add("window", window);
 	this->hash_add("shortcut", shortcut);
 	this->hash_add("targetgui", targetgui);
