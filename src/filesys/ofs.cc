@@ -1,4 +1,5 @@
 #include <filesys/ofs.h>
+#include <new>
 
 using namespace os;
 using namespace os::common;
@@ -6,7 +7,11 @@ using namespace os::drivers;
 using namespace os::filesystem;
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
+#endif
 bool strcmp(char* one, char* two);
 uint16_t strlen(char*);
 char* int2str(uint32_t);

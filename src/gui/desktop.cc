@@ -1,4 +1,5 @@
 #include <gui/desktop.h>
+#include <new>
 
 using namespace os;
 using namespace os::common;
@@ -306,8 +307,8 @@ void Desktop::MouseDraw(common::GraphicsContext* gc) {
 
 	uint8_t mouseW = 13;
 	uint8_t mouseH = 20;
-	int8_t offsetX = 0;
-	int8_t offsetY = 0;
+	os::common::int8_t offsetX = 0;
+	os::common::int8_t offsetY = 0;
 
 
 	if (this->osaka->sim == false) {

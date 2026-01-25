@@ -1,5 +1,6 @@
 #include <cli.h>
 #include <script.h>
+#include <new>
 
 
 using namespace os;
@@ -22,7 +23,11 @@ uint16_t hash(char* str);
 void TUI(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, bool);
 void putcharTUI(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
 uint16_t setTextColor(bool set, uint16_t color = 0x07);
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
+#endif
 void printOsaka(uint8_t, bool);
 
 uint16_t strlen(char* args);
@@ -84,7 +89,7 @@ void print(char* args, CommandLine* cli) {
 
 	uint32_t charNum = numOrVar(args, cli, 0);
 	char* foo = " ";
-	foo[0] = (int8_t)(charNum);
+	foo[0] = (os::common::int8_t)(charNum);
 	
 	if (charNum < cli->lists->numOfNodes) {
 	
@@ -220,9 +225,21 @@ void heap(char* args, CommandLine* cli) {
 
 
 //asm
-void startInterrupts(char* args, CommandLine* cli) { asm volatile("sti"); }
-void stopInterrupts(char* args, CommandLine* cli) { asm volatile("cli"); }
-void halt(char* args, CommandLine* cli) { asm volatile("hlt"); }
+void startInterrupts(char* args, CommandLine* cli) { 
+#ifndef __EMSCRIPTEN__
+	asm volatile("sti"); 
+#endif
+}
+void stopInterrupts(char* args, CommandLine* cli) { 
+#ifndef __EMSCRIPTEN__
+	asm volatile("cli"); 
+#endif
+}
+void halt(char* args, CommandLine* cli) { 
+#ifndef __EMSCRIPTEN__
+	asm volatile("hlt"); 
+#endif
+}
 
 
 //assembler for generating executable 

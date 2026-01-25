@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>osakaOS - Web Edition</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            color: #aaa;
+            font-family: monospace;
+            overflow: auto;
+        }
+        body {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        
+        #container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            width: 100%;
+            max-width: 100%;
+        }
+        h1 {
+            margin: 0;
+            padding: 10px;
+            color: #0f0;
+        }
+        
+        #osaka-canvas {
+            border: 2px solid #333;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            background: #000;
+            display: block;
+        }
+        
+        #osaka-text-canvas {
+            border: 2px solid #333;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            background: #000;
+            display: block; /* Show text canvas by default */
+        }
+        
+        #status {
+            text-align: center;
+            font-size: 14px;
+        }
+        
+        #loading {
+            text-align: center;
+            font-size: 18px;
+            color: #0f0;
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>osakaOS v2.1 - Web Edition</h1>
+        <div id="loading">Loading osakaOS...</div>
+        <div id="status" class="hidden"></div>
+        <canvas id="osaka-canvas" width="320" height="200" style="display: block;"></canvas>
+        <canvas id="osaka-text-canvas" width="640" height="400" style="display: block;"></canvas>
+    </div>
+    
+    <!-- Fallback message if JS fails -->
+    <noscript>
+        <div style="color: #f00; text-align: center; padding: 20px;">
+            JavaScript is required to run osakaOS. Please enable JavaScript in your browser.
+        </div>
+    </noscript>
+    
+    <script>
+        // Test that JavaScript is running
+        console.log('HTML loaded, initializing Module...');
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded');
+        });
+        
+        // Error handling
+        // Error handling
+        window.addEventListener('error', function(e) {
+            console.error('Global error:', e);
+            var status = document.getElementById('status');
+            if (status) {
+                status.textContent = 'Error: ' + (e.message || 'Unknown error');
+                status.classList.remove('hidden');
+                status.style.color = '#f00';
+            }
+        });
+        
+        window.addEventListener('unhandledrejection', function(e) {
+            console.error('Unhandled promise rejection:', e);
+            var status = document.getElementById('status');
+            if (status) {
+                status.textContent = 'Error: ' + (e.reason || 'Unknown error');
+                status.classList.remove('hidden');
+                status.style.color = '#f00';
+            }
+        });
+        
+        // Define Module configuration before loading osakaOS.js
+        var Module = {
+            preRun: [],
+            postRun: [],
+            onRuntimeInitialized: function() {
+                console.log('[JS] Emscripten runtime initialized');
+                
+                // Ensure safeReadAndPrintString and renderPixels are still available
+                // (Emscripten might have replaced the Module object)
+                if (!Module.safeReadAndPrintString) {
+                    console.error('[JS] safeReadAndPrintString missing after runtime init! Re-attaching...');
+                    // Re-attach the function from the original Module definition
+                    Module.safeReadAndPrintString = function(ptr) {
+                        if (!ptr) return;
+                        try {
+                            var heapU8 = (typeof HEAPU8 !== 'undefined') ? HEAPU8 : window.HEAPU8;
+                            if (!heapU8) {
+                                console.error('[JS] HEAPU8 not available');
+                                return;
+                            }
+                            var heapSize = heapU8.length;
+                            if (ptr < 0 || ptr >= heapSize) return;
+                            var str = '';
+                            var maxLen = Math.min(256, heapSize - ptr);
+                            for (var i = 0; i < maxLen; i++) {
+                                if (ptr + i >= heapSize) break;
+                                var ch = heapU8[ptr + i];
+                                if (ch === 0) break;
+                                str += String.fromCharCode(ch);
+                            }
+                            if (!Module._printf_x) Module._printf_x = 0;
+                            if (!Module._printf_y) Module._printf_y = 0;
+                            for (var i = 0; i < str.length; i++) {
+                                var ch = str.charCodeAt(i);
+                                if (ch === 10) {
+                                    Module._printf_y++;
+                                    Module._printf_x = 0;
+                                    continue;
+                                }
+                                if (Module.putCharTUI) {
+                                    Module.putCharTUI(Module._printf_x, Module._printf_y, ch, 0x07, 0x00);
+                                }
+                                Module._printf_x++;
+                                if (Module._printf_x >= 80) {
+                                    Module._printf_x = 0;
+                                    Module._printf_y++;
+                                }
+                                if (Module._printf_y >= 25) {
+                                    Module._printf_y = 24;
+                                }
+                            }
+                        } catch (e) {
+                            console.error('[JS] safeReadAndPrintString error:', e);
+                        }
+                    };
+                    console.log('[JS] safeReadAndPrintString re-attached');
+                } else {
+                    console.log('[JS] safeReadAndPrintString is available');
+                }
+                if (!Module.renderPixels) {
+                    console.error('[JS] renderPixels missing after runtime init!');
+                } else {
+                    console.log('[JS] renderPixels is available');
+                }
+                if (!Module.putCharTUI) {
+                    console.error('[JS] putCharTUI missing after runtime init! Re-attaching...');
+                    // Re-attach putCharTUI
+                    Module.putCharTUI = function(x, y, ch, fg, bg) {
+                        var canvas = document.getElementById('osaka-text-canvas');
+                        if (!canvas) return;
+                        var ctx = canvas.getContext('2d');
+                        if (!ctx) return;
+                        var colors = [
+                            [0, 0, 0], [0, 0, 170], [0, 170, 0], [0, 170, 170],
+                            [170, 0, 0], [170, 0, 170], [170, 85, 0], [170, 170, 170],
+                            [85, 85, 85], [85, 85, 255], [85, 255, 85], [85, 255, 255],
+                            [255, 85, 85], [255, 85, 255], [255, 255, 85], [255, 255, 255]
+                        ];
+                        var fgColor = colors[fg & 0x0F] || [170, 170, 170];
+                        var bgColor = colors[(bg >> 4) & 0x0F] || [0, 0, 0];
+                        ctx.fillStyle = 'rgb(' + bgColor.join(',') + ')';
+                        ctx.fillRect(x * 8, y * 16, 8, 16);
+                        var chStr = String.fromCharCode(ch);
+                        if (chStr !== '\0' && chStr !== ' ') {
+                            ctx.fillStyle = 'rgb(' + fgColor.join(',') + ')';
+                            ctx.font = 'bold 16px monospace';
+                            ctx.textAlign = 'left';
+                            ctx.textBaseline = 'top';
+                            ctx.fillText(chStr, x * 8, y * 16);
+                        }
+                    };
+                    console.log('[JS] putCharTUI re-attached');
+                } else {
+                    console.log('[JS] putCharTUI is available');
+                }
+                
+                var loading = document.getElementById('loading');
+                if (loading) {
+                    loading.textContent = 'osakaOS loaded!';
+                }
+                
+                // Check if required functions are available
+                console.log('[JS] Checking available functions...');
+                console.log('[JS] _kernelMain:', typeof Module._kernelMain);
+                console.log('[JS] _malloc:', typeof Module._malloc);
+                    console.log('[JS] HEAPU8 (global):', typeof HEAPU8, 'window.HEAPU8:', typeof window.HEAPU8);
+                
+                if (!Module._kernelMain) {
+                    console.error('[JS] _kernelMain not found! Available functions:', Object.keys(Module).filter(k => k.startsWith('_')).slice(0, 20));
+                    var status = document.getElementById('status');
+                    if (status) {
+                        status.textContent = 'Error: kernelMain not found';
+                        status.classList.remove('hidden');
+                        status.style.color = '#f00';
+                    }
+                    return;
+                }
+                
+                if (typeof HEAPU8 === 'undefined' && typeof window.HEAPU8 === 'undefined') {
+                    console.error('[JS] HEAPU8 not available! Cannot start kernel.');
+                    var status = document.getElementById('status');
+                    if (status) {
+                        status.textContent = 'Error: HEAPU8 not available';
+                        status.classList.remove('hidden');
+                        status.style.color = '#f00';
+                    }
+                    return;
+                }
+                
+                console.log('[JS] All prerequisites met, starting kernel...');
+                
+                // Start the kernel after a longer delay to ensure page is fully ready
+                // Use requestAnimationFrame to ensure browser has rendered
+                requestAnimationFrame(function() {
+                    setTimeout(function() {
+                        console.log('[JS] Starting kernel (delayed start)...');
+                        try {
+                            // Create fake multiboot structure
+                            if (!Module._malloc) {
+                                throw new Error('_malloc not available');
+                            }
+                            // Allocate multiboot structure (at least 16 uint32_t = 64 bytes)
+                            // Multiboot structure format:
+                            // offset 0: flags (uint32_t)
+                            // offset 4: mem_lower (uint32_t) - not used
+                            // offset 8: mem_upper (uint32_t) - memory upper bound in KB
+                            var fakeMultiboot = Module._malloc(64);
+                            if (!fakeMultiboot) {
+                                throw new Error('Failed to allocate multiboot structure');
+                            }
+                            console.log('[JS] Allocated multiboot structure at:', fakeMultiboot);
+                            
+                            // Get heap access - HEAPU8 is a global variable
+                            var heapBuffer;
+                            if (typeof HEAPU8 !== 'undefined') {
+                                heapBuffer = HEAPU8.buffer;
+                            } else if (typeof window !== 'undefined' && window.HEAPU8) {
+                                heapBuffer = window.HEAPU8.buffer;
+                            } else if (typeof HEAP8 !== 'undefined') {
+                                heapBuffer = HEAP8.buffer;
+                            } else {
+                                throw new Error('No heap access available - HEAPU8 not found');
+                            }
+                            
+                            // Initialize multiboot structure
+                            // Multiboot structure layout (each field is 4 bytes):
+                            // [0] flags (uint32_t)
+                            // [1] mem_lower (uint32_t) - not used
+                            // [2] mem_upper (uint32_t) - memory upper bound in KB (at offset 8)
+                            var heap = new Uint32Array(heapBuffer, fakeMultiboot, 16);
+                            heap[0] = 0; // flags = 0
+                            heap[1] = 0; // mem_lower = 0 (not used)
+                            // mem_upper is at offset 8 bytes = index 2 in uint32_t array
+                            // Value is in KB: 8MB = 8192 KB
+                            heap[2] = 8192; // mem_upper = 8192 KB (8MB)
+                            
+                            console.log('[JS] Multiboot structure initialized:', {
+                                'address': fakeMultiboot,
+                                'flags': heap[0],
+                                'mem_lower (KB)': heap[1],
+                                'mem_upper (KB)': heap[2],
+                                'mem_upper (MB)': heap[2] / 1024,
+                                'offset 8 value': new DataView(heapBuffer, fakeMultiboot + 8, 4).getUint32(0, true)
+                            });
+                            console.log('[JS] Multiboot structure initialized');
+                            
+                            // Call kernelMain directly
+                            console.log('[JS] Calling kernelMain with pointer:', fakeMultiboot, 'magic: 0x2BADB002');
+                            console.log('[JS] HEAPU8 available:', typeof HEAPU8 !== 'undefined', 'length:', typeof HEAPU8 !== 'undefined' ? HEAPU8.length : 'N/A');
+                            try {
+                                var result = Module._kernelMain(fakeMultiboot, 0x2BADB002);
+                                console.log('[JS] kernelMain returned:', result);
+                            } catch (e) {
+                                console.error('[JS] Exception calling kernelMain:', e);
+                                console.error('[JS] Stack:', e.stack);
+                                throw e;
+                            }
+                        } catch (e) {
+                            console.error('[JS] Error starting kernel:', e);
+                            console.error('[JS] Stack:', e.stack);
+                            var status = document.getElementById('status');
+                            if (status) {
+                                status.textContent = 'Error starting kernel: ' + e.message;
+                                status.classList.remove('hidden');
+                                status.style.color = '#f00';
+                            }
+                        }
+                    }, 500); // Longer delay to ensure page is ready
+                });
+            },
+            onAbort: function(reason) {
+                console.error('Module aborted:', reason);
+                var status = document.getElementById('status');
+                if (status) {
+                    status.textContent = 'Error: ' + reason;
+                    status.classList.remove('hidden');
+                    status.style.color = '#f00';
+                }
+            },
+            print: function(text) {
+                console.log(text);
+                var status = document.getElementById('status');
+                if (status) {
+                    status.textContent = text;
+                    status.classList.remove('hidden');
+                }
+            },
+            printErr: function(text) {
+                console.error(text);
+                var status = document.getElementById('status');
+                if (status) {
+                    status.textContent = 'Error: ' + text;
+                    status.classList.remove('hidden');
+                    status.style.color = '#f00';
+                }
+            },
+            canvas: (function() {
+                var canvas = document.getElementById('osaka-canvas');
+                canvas.addEventListener("webglcontextlost", function(e) {
+                    alert('WebGL context lost. You will need to reload the page.');
+                    e.preventDefault();
+                }, false);
+                return canvas;
+            })(),
+            setStatus: function(text) {
+                var loading = document.getElementById('loading');
+                if (loading) {
+                    loading.textContent = text;
+                }
+            },
+            totalDependencies: 0,
+            monitorRunDependencies: function(left) {
+                this.totalDependencies = Math.max(this.totalDependencies, left);
+                Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies - left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
+            },
+            ega_palette: [],
+            noInitialRun: false,  // Let Emscripten initialize normally
+            locateFile: function(path) {
+                // Ensure WASM file is loaded from correct location
+                if (path.endsWith('.wasm')) {
+                    return 'osakaOS.wasm';
+                }
+                return path;
+            },
+            // Safe string reading function that handles out-of-bounds pointers
+            safeReadAndPrintString: function(ptr) {
+                if (!ptr) {
+                    console.log('[JS] safeReadAndPrintString: null pointer');
+                    return;
+                }
+                
+                try {
+                    // Get HEAPU8 - it might be global or on window
+                    var heapU8;
+                    if (typeof HEAPU8 !== 'undefined') {
+                        heapU8 = HEAPU8;
+                    } else if (typeof window !== 'undefined' && window.HEAPU8) {
+                        heapU8 = window.HEAPU8;
+                    } else {
+                        console.error('[JS] safeReadAndPrintString: HEAPU8 not available');
+                        return;
+                    }
+                    
+                    var heapSize = heapU8.length;
+                    if (ptr < 0 || ptr >= heapSize) {
+                        console.log('[JS] safeReadAndPrintString: pointer out of bounds', ptr, 'heapSize:', heapSize);
+                        return;
+                    }
+                    
+                    var str = '';
+                    var maxLen = Math.min(256, heapSize - ptr);
+                    for (var i = 0; i < maxLen; i++) {
+                        if (ptr + i >= heapSize) break;
+                        var ch = heapU8[ptr + i];
+                        if (ch === 0) break; // Null terminator
+                        str += String.fromCharCode(ch);
+                    }
+                    
+                    console.log('[JS] safeReadAndPrintString: read string:', str.substring(0, 50));
+                    
+                    // Now render the string character by character
+                    if (!Module._printf_x) Module._printf_x = 0;
+                    if (!Module._printf_y) Module._printf_y = 0;
+                    
+                    for (var i = 0; i < str.length; i++) {
+                        var ch = str.charCodeAt(i);
+                        if (ch === 10) { // newline
+                            Module._printf_y++;
+                            Module._printf_x = 0;
+                            continue;
+                        }
+                        
+                        if (Module.putCharTUI) {
+                            Module.putCharTUI(Module._printf_x, Module._printf_y, ch, 0x07, 0x00);
+                        } else {
+                            console.error('[JS] Module.putCharTUI not found!');
+                        }
+                        
+                        Module._printf_x++;
+                        if (Module._printf_x >= 80) {
+                            Module._printf_x = 0;
+                            Module._printf_y++;
+                        }
+                        if (Module._printf_y >= 25) {
+                            Module._printf_y = 24; // Scroll
+                        }
+                    }
+                } catch (e) {
+                    console.error('[JS] safeReadAndPrintString error:', e);
+                }
+            },
+            // Function to render pixels to canvas
+            renderPixels: function(pixelPtr) {
+                console.log('[JS] renderPixels called with pointer:', pixelPtr);
+                var canvas = document.getElementById('osaka-canvas');
+                if (!canvas) {
+                    console.error('[JS] Canvas not found!');
+                    return;
+                }
+                var ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    console.error('[JS] Could not get 2d context!');
+                    return;
+                }
+                var imageData = ctx.createImageData(320, 200);
+                var data = imageData.data;
+                
+                // Get heap access - HEAPU8 is a global variable
+                var heapU8;
+                if (typeof HEAPU8 !== 'undefined') {
+                    heapU8 = HEAPU8;
+                } else if (typeof window !== 'undefined' && window.HEAPU8) {
+                    heapU8 = window.HEAPU8;
+                } else if (typeof HEAP8 !== 'undefined') {
+                    heapU8 = HEAP8;
+                } else {
+                    console.error('[JS] No heap access available! HEAPU8 not found');
+                    return;
+                }
+                
+                if (pixelPtr < 0 || pixelPtr + 64000 > heapU8.length) {
+                    console.error('[JS] renderPixels: pointer out of bounds', pixelPtr, 'heapSize:', heapU8.length);
+                    return;
+                }
+                
+                var pixels = heapU8.subarray(pixelPtr, pixelPtr + 64000);
+                console.log('[JS] Pixels array length:', pixels.length, 'first few values:', pixels[0], pixels[1], pixels[2]);
+                
+                for (var i = 0; i < 64000; i++) {
+                    var colorIndex = pixels[i];
+                    var r = 0, g = 0, b = 0;
+                    
+                    // Use EGA palette if available
+                    if (Module.ega_palette && Module.ega_palette[colorIndex]) {
+                        r = Module.ega_palette[colorIndex][0];
+                        g = Module.ega_palette[colorIndex][1];
+                        b = Module.ega_palette[colorIndex][2];
+                    } else {
+                        // Fallback: simple color mapping
+                        r = (colorIndex & 0xE0);
+                        g = ((colorIndex & 0x1C) << 3);
+                        b = ((colorIndex & 0x03) << 6);
+                    }
+                    
+                    var idx = i * 4;
+                    data[idx] = r;     // R
+                    data[idx + 1] = g; // G
+                    data[idx + 2] = b; // B
+                    data[idx + 3] = 255; // A
+                }
+                
+                ctx.putImageData(imageData, 0, 0);
+                console.log('[JS] Canvas updated successfully, rendered', 64000, 'pixels');
+            }
+        };
+        
+        // Function to render a character to text canvas
+        Module.putCharTUI = function(x, y, ch, fg, bg) {
+            var canvas = document.getElementById('osaka-text-canvas');
+            if (!canvas) {
+                console.error('[JS] putCharTUI: canvas not found!');
+                return;
+            }
+            var ctx = canvas.getContext('2d');
+            if (!ctx) {
+                console.error('[JS] putCharTUI: could not get 2d context!');
+                return;
+            }
+            
+            // EGA color palette for text mode
+            var colors = [
+                [0, 0, 0],       // 0: Black
+                [0, 0, 170],     // 1: Blue
+                [0, 170, 0],     // 2: Green
+                [0, 170, 170],   // 3: Cyan
+                [170, 0, 0],     // 4: Red
+                [170, 0, 170],   // 5: Magenta
+                [170, 85, 0],    // 6: Brown
+                [170, 170, 170], // 7: Light Gray
+                [85, 85, 85],    // 8: Dark Gray
+                [85, 85, 255],   // 9: Light Blue
+                [85, 255, 85],   // 10: Light Green
+                [85, 255, 255],  // 11: Light Cyan
+                [255, 85, 85],   // 12: Light Red
+                [255, 85, 255],  // 13: Light Magenta
+                [255, 255, 85],  // 14: Yellow
+                [255, 255, 255]  // 15: White
+            ];
+            
+            var fgColor = colors[fg & 0x0F] || [170, 170, 170];
+            var bgColor = colors[(bg >> 4) & 0x0F] || [0, 0, 0];
+            
+            // Fill background
+            ctx.fillStyle = 'rgb(' + bgColor.join(',') + ')';
+            ctx.fillRect(x * 8, y * 16, 8, 16);
+            
+            // Draw character
+            var chStr = String.fromCharCode(ch);
+            if (chStr !== '\0' && chStr !== ' ') {
+                ctx.fillStyle = 'rgb(' + fgColor.join(',') + ')';
+                ctx.font = 'bold 16px monospace';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
+                ctx.fillText(chStr, x * 8, y * 16);
+            }
+        };
+        
+        // Function to clear text canvas
+        Module.clearTextCanvas = function() {
+            var canvas = document.getElementById('osaka-text-canvas');
+            if (canvas) {
+                var ctx = canvas.getContext('2d');
+                ctx.fillStyle = 'rgb(0, 0, 0)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        };
+        
+        // Network functions for JavaScript-based networking
+        Module.networkPackets = [];
+        Module.networkIP = {ip1: 10, ip2: 0, ip3: 2, ip4: 15};
+        Module.networkMAC = 0x020000000000;
+        
+        // Set network IP address
+        Module.setNetworkIP = function(ip4, ip3, ip2, ip1) {
+            Module.networkIP = {ip1: ip1, ip2: ip2, ip3: ip3, ip4: ip4};
+            console.log('[JS] Network IP set to:', ip4 + '.' + ip3 + '.' + ip2 + '.' + ip1);
+        };
+        
+        // Get network MAC address
+        Module.getNetworkMAC = function() {
+            // Return MAC as 48-bit integer (high 16 bits are 0x0200)
+            return Module.networkMAC;
+        };
+        
+        // Send network packet via fetch API (simulating HTTP)
+        Module.sendNetworkPacket = function(packet) {
+            try {
+                // Parse Ethernet frame
+                if (packet.length < 14) return; // Minimum Ethernet header size
+                
+                // Extract destination MAC (bytes 0-5)
+                var dstMac = 0;
+                for (var i = 0; i < 6; i++) {
+                    dstMac = (dstMac << 8) | packet[i];
+                }
+                
+                // Extract source MAC (bytes 6-11)
+                var srcMac = 0;
+                for (var i = 6; i < 12; i++) {
+                    srcMac = (srcMac << 8) | packet[i];
+                }
+                
+                // Extract EtherType (bytes 12-13)
+                var etherType = (packet[12] << 8) | packet[13];
+                
+                // For IPv4 (0x0800), extract IP packet
+                if (etherType === 0x0800 && packet.length >= 34) {
+                    // Extract destination IP (bytes 30-33 in Ethernet frame, bytes 16-19 in IP header)
+                    var dstIP = packet[30] + '.' + packet[31] + '.' + packet[32] + '.' + packet[33];
+                    var protocol = packet[23]; // IP protocol field
+                    
+                    // For TCP (6) or UDP (17), we could make HTTP requests
+                    // For now, just log it
+                    console.log('[JS] Network packet:', {
+                        dstMac: '0x' + dstMac.toString(16),
+                        srcMac: '0x' + srcMac.toString(16),
+                        etherType: '0x' + etherType.toString(16),
+                        dstIP: dstIP,
+                        protocol: protocol,
+                        size: packet.length
+                    });
+                    
+                    // TODO: Implement actual HTTP/TCP networking here
+                    // For now, this is a placeholder
+                }
+            } catch (e) {
+                console.error('[JS] Error in sendNetworkPacket:', e);
+            }
+        };
+        
+        // Poll for received network packets
+        Module.pollNetworkPackets = function() {
+            // Check if there are any packets in the queue
+            if (Module.networkPackets.length > 0) {
+                var packet = Module.networkPackets.shift();
+                // Notify C++ side of received packet
+                if (Module.onNetworkPacketReceived) {
+                    Module.onNetworkPacketReceived(packet.ptr, packet.size);
+                }
+            }
+        };
+        
+        // Function to simulate receiving a network packet (can be called from external code)
+        Module.simulateNetworkPacket = function(data) {
+            // Allocate memory in WASM heap for the packet
+            if (!Module._malloc) return;
+            
+            var size = data.length;
+            var ptr = Module._malloc(size);
+            if (!ptr) return;
+            
+            // Copy data to WASM heap
+            var heap = new Uint8Array(HEAPU8.buffer, ptr, size);
+            heap.set(data);
+            
+            // Queue the packet
+            Module.networkPackets.push({ptr: ptr, size: size});
+        };
+        
+        // Safe string reading function that handles out-of-bounds pointers
+        Module.safeReadAndPrintString = function(ptr) {
+            if (!ptr) return;
+            
+            try {
+                var heapSize = HEAPU8.length;
+                if (ptr < 0 || ptr >= heapSize) {
+                    // Pointer is outside heap bounds, skip silently
+                    return;
+                }
+                
+                var str = '';
+                var maxLen = Math.min(256, heapSize - ptr);
+                for (var i = 0; i < maxLen; i++) {
+                    if (ptr + i >= heapSize) break;
+                    var ch = HEAPU8[ptr + i];
+                    if (ch === 0) break; // Null terminator
+                    str += String.fromCharCode(ch);
+                }
+                
+                // Now render the string character by character
+                if (!Module._printf_x) Module._printf_x = 0;
+                if (!Module._printf_y) Module._printf_y = 0;
+                
+                for (var i = 0; i < str.length; i++) {
+                    var ch = str.charCodeAt(i);
+                    if (ch === 10) { // newline
+                        Module._printf_y++;
+                        Module._printf_x = 0;
+                        continue;
+                    }
+                    
+                    if (Module.putCharTUI) {
+                        Module.putCharTUI(Module._printf_x, Module._printf_y, ch, 0x07, 0x00);
+                    }
+                    
+                    Module._printf_x++;
+                    if (Module._printf_x >= 80) {
+                        Module._printf_x = 0;
+                        Module._printf_y++;
+                    }
+                    if (Module._printf_y >= 25) {
+                        Module._printf_y = 24; // Scroll
+                    }
+                }
+            } catch (e) {
+                // Silently fail - string might be in inaccessible memory
+            }
+        };
+        
+        // Function to render pixels to canvas
+        Module.renderPixels = function(pixelPtr) {
+            console.log('[JS] renderPixels called with pointer:', pixelPtr);
+            var canvas = document.getElementById('osaka-canvas');
+            if (!canvas) {
+                console.error('[JS] Canvas not found!');
+                return;
+            }
+            var ctx = canvas.getContext('2d');
+            if (!ctx) {
+                console.error('[JS] Could not get 2d context!');
+                return;
+            }
+            var imageData = ctx.createImageData(320, 200);
+            var data = imageData.data;
+            
+            // Get heap access - HEAPU8 is a global variable
+            var heapU8;
+            if (typeof HEAPU8 !== 'undefined') {
+                heapU8 = HEAPU8;
+            } else if (typeof window !== 'undefined' && window.HEAPU8) {
+                heapU8 = window.HEAPU8;
+            } else if (typeof HEAP8 !== 'undefined') {
+                heapU8 = HEAP8;
+            } else {
+                console.error('[JS] No heap access available! HEAPU8 not found');
+                return;
+            }
+            
+            if (pixelPtr < 0 || pixelPtr + 64000 > heapU8.length) {
+                console.error('[JS] renderPixels: pointer out of bounds', pixelPtr, 'heapSize:', heapU8.length);
+                return;
+            }
+            
+            var pixels = heapU8.subarray(pixelPtr, pixelPtr + 64000);
+            console.log('[JS] Pixels array length:', pixels.length, 'first few values:', pixels[0], pixels[1], pixels[2]);
+            
+            for (var i = 0; i < 64000; i++) {
+                var colorIdx = pixels[i];
+                var rVal = 0, gVal = 0, bVal = 0;
+                
+                if (Module.ega_palette && Module.ega_palette[colorIdx]) {
+                    rVal = Module.ega_palette[colorIdx][0];
+                    gVal = Module.ega_palette[colorIdx][1];
+                    bVal = Module.ega_palette[colorIdx][2];
+                } else {
+                    var color = colorIdx;
+                    var div = Math.floor(color / 64);
+                    if (div === 0) {
+                        rVal = (color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0);
+                        gVal = (color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0);
+                        bVal = (color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0);
+                    }
+                }
+                
+                var idx = i * 4;
+                data[idx] = rVal;
+                data[idx + 1] = gVal;
+                data[idx + 2] = bVal;
+                data[idx + 3] = 255;
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+            console.log('[JS] Canvas updated successfully');
+        };
+        
+        // Initialize EGA palette
+        for (var i = 0; i < 256; i++) {
+            Module.ega_palette[i] = [0, 0, 0];
+            var r = 0, g = 0, b = 0;
+            
+            switch (Math.floor(i / 64)) {
+                case 0:
+                    r = (i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0);
+                    g = (i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0);
+                    b = (i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0);
+                    break;
+                case 1:
+                    r = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) >> 3;
+                    g = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) >> 3;
+                    b = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) >> 3;
+                    break;
+                case 2:
+                    r = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) << 3;
+                    g = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) << 3;
+                    b = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) << 3;
+                    break;
+            }
+            
+            Module.ega_palette[i] = [r, g, b];
+        }
+        
+        // Setup canvas scaling
+        window.addEventListener('load', function() {
+            var canvas = document.getElementById('osaka-canvas');
+            var textCanvas = document.getElementById('osaka-text-canvas');
+            
+            function resizeCanvas() {
+                var scale = Math.min(
+                    (window.innerWidth - 40) / 320,
+                    (window.innerHeight - 200) / 200
+                );
+                scale = Math.max(1, Math.floor(scale));
+                canvas.style.width = (320 * scale) + 'px';
+                canvas.style.height = (200 * scale) + 'px';
+                
+                if (textCanvas) {
+                    textCanvas.style.width = (640 * scale) + 'px';
+                    textCanvas.style.height = (400 * scale) + 'px';
+                }
+            }
+            
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+        });
+    </script>
+    <!-- Load script asynchronously to prevent blocking -->
+    <script>
+        // Load the module script asynchronously
+        var script = document.createElement('script');
+        script.src = 'osakaOS.js';
+        script.async = true;
+        script.onerror = function() {
+            console.error('Failed to load osakaOS.js');
+            var status = document.getElementById('status');
+            if (status) {
+                status.textContent = 'Failed to load osakaOS.js';
+                status.classList.remove('hidden');
+                status.style.color = '#f00';
+            }
+        };
+        script.onload = function() {
+            console.log('[JS] osakaOS.js loaded');
+            
+            // Wait a bit for the script to execute
+            setTimeout(function() {
+                console.log('[JS] Checking module state after script load...');
+                console.log('[JS] Module:', typeof Module !== 'undefined' ? 'defined' : 'undefined');
+                console.log('[JS] Module.ready:', typeof Module !== 'undefined' && Module.ready);
+                console.log('[JS] Module.calledRun:', typeof Module !== 'undefined' && Module.calledRun);
+                
+                // Poll for module initialization since onRuntimeInitialized might not fire
+                var checkCount = 0;
+                var checkInterval = setInterval(function() {
+                    checkCount++;
+                    if (checkCount > 100) { // Stop after 10 seconds (100 * 100ms)
+                        clearInterval(checkInterval);
+                        return;
+                    }
+                    
+                    if (typeof Module !== 'undefined') {
+                        // Check if runtime is initialized - HEAPU8 is a global variable
+                        var hasHeap = typeof HEAPU8 !== 'undefined' || typeof window.HEAPU8 !== 'undefined';
+                        var hasKernelMain = typeof Module._kernelMain !== 'undefined';
+                        var hasMalloc = typeof Module._malloc !== 'undefined';
+                        
+                        if (checkCount % 10 === 0) { // Log every second
+                            console.log('[JS] Polling... HEAPU8 (global):', typeof HEAPU8, 'window.HEAPU8:', typeof window.HEAPU8, '_kernelMain:', hasKernelMain, '_malloc:', hasMalloc);
+                        }
+                        
+                        if (hasHeap && hasKernelMain && hasMalloc) {
+                            console.log('[JS] Module fully initialized (HEAPU8 and _kernelMain available)!');
+                            clearInterval(checkInterval);
+                            if (Module.onRuntimeInitialized && !moduleInitialized) {
+                                Module.onRuntimeInitialized();
+                            }
+                        }
+                    }
+                }, 100);
+            }, 500); // Wait 500ms for script to execute
+        };
+        document.head.appendChild(script);
+        
+        // Track module initialization - wait for Module to be defined
+        var moduleInitialized = false;
+        var originalOnRuntimeInitialized = Module.onRuntimeInitialized; // Capture it NOW, before script loads
+        
+        // Wrap the onRuntimeInitialized to add logging
+        Module.onRuntimeInitialized = function() {
+            console.log('[JS] onRuntimeInitialized wrapper called');
+            console.log('[JS] Module state - _kernelMain:', typeof Module._kernelMain, 'HEAPU8:', typeof HEAPU8);
+            moduleInitialized = true;
+            
+            // Always call the original - it has the kernel startup code
+            if (originalOnRuntimeInitialized) {
+                console.log('[JS] Calling original onRuntimeInitialized (has kernel startup code)...');
+                originalOnRuntimeInitialized();
+            } else {
+                console.error('[JS] ERROR: originalOnRuntimeInitialized is undefined!');
+                console.error('[JS] This should not happen - the kernel startup code is missing!');
+                // Fallback: try to start kernel directly
+                if (Module._kernelMain && typeof HEAPU8 !== 'undefined') {
+                    console.log('[JS] Attempting to start kernel directly as fallback...');
+                    try {
+                        var fakeMultiboot = Module._malloc(16 * 4);
+                        var heap = new Uint32Array(HEAPU8.buffer, fakeMultiboot, 16);
+                        heap[0] = 0;
+                        heap[1] = 0x800000;
+                        Module._kernelMain(fakeMultiboot, 0x2BADB002);
+                        console.log('[JS] Fallback kernel start succeeded');
+                    } catch (e) {
+                        console.error('[JS] Fallback kernel start failed:', e);
+                        console.error('[JS] Stack:', e.stack);
+                    }
+                }
+            }
+        };
+        
+        // Fallback if module doesn't load
+        setTimeout(function() {
+            if (!moduleInitialized) {
+                console.error('[JS] Module failed to initialize after 10 seconds');
+                console.log('[JS] Module state:', {
+                    defined: typeof Module !== 'undefined',
+                    hasHEAP8: typeof HEAP8 !== 'undefined',
+                    hasHEAPU8: typeof HEAPU8 !== 'undefined' || typeof window.HEAPU8 !== 'undefined',
+                    has_asm: typeof Module !== 'undefined' && typeof Module.asm !== 'undefined',
+                    has_kernelMain: typeof Module !== 'undefined' && typeof Module._kernelMain !== 'undefined'
+                });
+                
+                // Try to manually trigger if we have the essentials
+                var heapAvailable = typeof HEAPU8 !== 'undefined' || typeof window.HEAPU8 !== 'undefined';
+                if (typeof Module !== 'undefined' && Module._kernelMain && heapAvailable && !moduleInitialized) {
+                    console.log('[JS] Module appears ready, starting kernel directly...');
+                    moduleInitialized = true;
+                    
+                    // Call original onRuntimeInitialized if available
+                    if (originalOnRuntimeInitialized) {
+                        console.log('[JS] Calling original onRuntimeInitialized...');
+                        originalOnRuntimeInitialized();
+                    } else {
+                        // Start kernel directly
+                        console.log('[JS] Starting kernel directly (no original callback)...');
+                        try {
+                            var fakeMultiboot = Module._malloc(16 * 4);
+                            var heap = new Uint32Array(HEAPU8.buffer, fakeMultiboot, 16);
+                            heap[0] = 0;
+                            heap[1] = 0x800000;
+                            console.log('[JS] Calling kernelMain...');
+                            Module._kernelMain(fakeMultiboot, 0x2BADB002);
+                            console.log('[JS] kernelMain returned');
+                        } catch (e) {
+                            console.error('[JS] Error starting kernel:', e);
+                        }
+                    }
+                } else {
+                    var status = document.getElementById('status');
+                    if (status) {
+                        status.textContent = 'Failed to initialize osakaOS. Check console for errors.';
+                        status.classList.remove('hidden');
+                        status.style.color = '#f00';
+                    }
+                }
+            }
+        }, 2000);
+    </script>
+</body>
+</html>
+

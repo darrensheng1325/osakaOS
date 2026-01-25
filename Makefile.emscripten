@@ -1,0 +1,77 @@
+# Emscripten Makefile for osakaOS
+
+EMCC = emcc
+EMCCFLAGS = -Iinclude -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 \
+	-s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","callMain"]' \
+	-s EXPORTED_FUNCTIONS='["_main","_malloc","_free","_kernelMain","_printf","_putcharTUI","_shouldContinueCLILoop","_setCLILoopActive","_shouldContinueGUILoop","_setGUILoopActive","_web_yield"]' \
+	-s INITIAL_MEMORY=67108864 \
+	-s STACK_SIZE=524288 \
+	-s USE_WEBGL2=0 \
+	-s NO_EXIT_RUNTIME=1 \
+	-s ASYNCIFY=1 \
+	-g4 \
+	--no-entry
+
+# Source files (excluding assembly and hardware-specific files that need stubs)
+SOURCES = src/kernel.cc \
+	  src/gdt.cc \
+	  src/memorymanagement.cc \
+	  src/art.cc \
+	  src/drivers/driver.cc \
+	  src/multitasking.cc \
+	  src/code/asm.cc \
+	  src/gui/widget.cc \
+	  src/gui/desktop.cc \
+	  src/gui/window.cc \
+	  src/gui/sim.cc \
+	  src/gui/raycasting.cc \
+	  src/gui/games/platformer.cc \
+	  src/gui/games/shooter.cc \
+	  src/net/network.cc \
+	  src/net/etherframe.cc \
+	  src/net/arp.cc \
+	  src/net/ipv4.cc \
+	  src/net/icmp.cc \
+	  src/filesys/ofs.cc \
+	  src/cli.cc \
+	  src/app.cc \
+	  src/list.cc \
+	  src/app/paint.cc \
+	  src/app/file_edit.cc \
+	  src/app/file_browse.cc \
+	  src/script.cc \
+	  src/math.cc \
+	  src/mode/piano.cc \
+	  src/mode/snake.cc \
+	  src/mode/file_edit.cc \
+	  src/mode/space.cc \
+	  src/drivers/vga_web.cc \
+	  src/drivers/keyboard_web.cc \
+	  src/drivers/mouse_web.cc \
+	  src/hardwarecommunication/port_stub.cc \
+	  src/hardwarecommunication/interrupts_web.cc \
+	  src/hardwarecommunication/pci_stub.cc \
+	  src/drivers/ata_stub.cc \
+	  src/drivers/amd_am79c973_stub.cc \
+	  src/drivers/pit_web.cc \
+	  src/drivers/cmos_stub.cc \
+	  src/drivers/speaker_web.cc \
+	  src/kernel_web.cc \
+	  src/kernel_web_entry.cc \
+	  src/kernel_web_loop.cc
+
+OBJECTS = $(SOURCES:.cc=.o)
+
+all: osakaOS.js
+
+osakaOS.js: $(OBJECTS)
+	$(EMCC) $(EMCCFLAGS) -o osakaOS.js $(OBJECTS) -s EXPORT_NAME="'OsakaOS'"
+
+%.o: %.cc
+	$(EMCC) $(EMCCFLAGS) -c $< -o $@
+
+clean:
+	rm -f $(OBJECTS) osakaOS.js osakaOS.wasm
+
+.PHONY: all clean
+

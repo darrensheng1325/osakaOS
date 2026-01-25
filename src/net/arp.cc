@@ -17,8 +17,13 @@ AddressResolutionProtocol::AddressResolutionProtocol(EtherFrameProvider* backend
 AddressResolutionProtocol::~AddressResolutionProtocol() {
 }
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+void printfHex(uint8_t);
+#else
 void printf(char*);
 void printfHex(uint8_t);
+#endif
 
 bool AddressResolutionProtocol::OnEtherFrameReceived(uint8_t* etherframePayload, uint32_t size) {
 	

@@ -1,4 +1,6 @@
 #include <memorymanagement.h>
+#include <stddef.h>
+#include <stdlib.h>
 
 
 using namespace os;
@@ -8,7 +10,7 @@ using namespace os::common;
 
 MemoryManager* MemoryManager::activeMemoryManager = 0;
 
-MemoryManager::MemoryManager(size_t start, size_t size) {
+MemoryManager::MemoryManager(os::common::size_t start, os::common::size_t size) {
 
 	activeMemoryManager = this;
 
@@ -37,7 +39,7 @@ MemoryManager::~MemoryManager() {
 
 
 
-void* MemoryManager::malloc(size_t size) {
+void* MemoryManager::malloc(os::common::size_t size) {
 
 	this->size += (uint32_t)size;
 
@@ -54,7 +56,7 @@ void* MemoryManager::malloc(size_t size) {
 
 	if (result->size >= size + sizeof(MemoryChunk) + 1) {
 	
-		MemoryChunk* temp = (MemoryChunk*)((size_t)result + sizeof(MemoryChunk) + size);
+		MemoryChunk* temp = (MemoryChunk*)((os::common::size_t)result + sizeof(MemoryChunk) + size);
 
 		temp->allocated = false;
 		temp->size = result->size - size - sizeof(MemoryChunk);
@@ -70,14 +72,14 @@ void* MemoryManager::malloc(size_t size) {
 	}
 	
 	result->allocated = true;
-	return (void*)(((size_t)result) + sizeof(MemoryChunk));
+	return (void*)(((os::common::size_t)result) + sizeof(MemoryChunk));
 }
 
 
 
 void MemoryManager::free(void* ptr) {
 
-	MemoryChunk* chunk = (MemoryChunk*)((size_t)ptr - sizeof(MemoryChunk));
+	MemoryChunk* chunk = (MemoryChunk*)((os::common::size_t)ptr - sizeof(MemoryChunk));
 	chunk -> allocated = false;
 	
 	if (chunk->prev != 0 && !chunk->prev->allocated) {
@@ -118,7 +120,7 @@ void MemoryManager::BufferShift(uint8_t* buffer, uint32_t bufsize,
 
 
 
-void* operator new(unsigned size) {
+void* operator new(::size_t size) {
 
 	if (os::MemoryManager::activeMemoryManager == 0) {
 	
@@ -129,7 +131,7 @@ void* operator new(unsigned size) {
 
 
 
-void* operator new[](unsigned size) {
+void* operator new[](::size_t size) {
 
 	if (os::MemoryManager::activeMemoryManager == 0) {
 	
@@ -140,19 +142,7 @@ void* operator new[](unsigned size) {
 
 
 
-void* operator new(unsigned size, void* ptr) {
-
-	return ptr;
-}
-
-
-
-void* operator new[](unsigned size, void* ptr) {
-
-	return ptr;
-}
-
-
+// Note: placement new is provided by the standard library
 
 void operator delete(void* ptr) {
 

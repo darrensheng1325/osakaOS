@@ -31,14 +31,26 @@ namespace os
             protected:
                 static inline os::common::uint8_t Read8(os::common::uint16_t _port)
                 {
+#ifdef __EMSCRIPTEN__
+                    // Web version - return 0
+                    (void)_port;
+                    return 0;
+#else
                     os::common::uint8_t result;
                     __asm__ volatile("inb %1, %0" : "=a" (result) : "Nd" (_port));
                     return result;
+#endif
                 }
 
                 static inline void Write8(os::common::uint16_t _port, os::common::uint8_t _data)
                 {
+#ifdef __EMSCRIPTEN__
+                    // Web version - do nothing
+                    (void)_port;
+                    (void)_data;
+#else
                     __asm__ volatile("outb %0, %1" : : "a" (_data), "Nd" (_port));
+#endif
                 }
         };
 
@@ -54,7 +66,13 @@ namespace os
             protected:
                 static inline void Write8Slow(os::common::uint16_t _port, os::common::uint8_t _data)
                 {
+#ifdef __EMSCRIPTEN__
+                    // Web version - do nothing
+                    (void)_port;
+                    (void)_data;
+#else
                     __asm__ volatile("outb %0, %1\njmp 1f\n1: jmp 1f\n1:" : : "a" (_data), "Nd" (_port));
+#endif
                 }
 
         };
@@ -73,14 +91,26 @@ namespace os
             protected:
                 static inline os::common::uint16_t Read16(os::common::uint16_t _port)
                 {
+#ifdef __EMSCRIPTEN__
+                    // Web version - return 0
+                    (void)_port;
+                    return 0;
+#else
                     os::common::uint16_t result;
                     __asm__ volatile("inw %1, %0" : "=a" (result) : "Nd" (_port));
                     return result;
+#endif
                 }
 
                 static inline void Write16(os::common::uint16_t _port, os::common::uint16_t _data)
                 {
+#ifdef __EMSCRIPTEN__
+                    // Web version - do nothing
+                    (void)_port;
+                    (void)_data;
+#else
                     __asm__ volatile("outw %0, %1" : : "a" (_data), "Nd" (_port));
+#endif
                 }
         };
 
@@ -98,14 +128,26 @@ namespace os
             protected:
                 static inline os::common::uint32_t Read32(os::common::uint16_t _port)
                 {
+#ifdef __EMSCRIPTEN__
+                    // Web version - return 0
+                    (void)_port;
+                    return 0;
+#else
                     os::common::uint32_t result;
                     __asm__ volatile("inl %1, %0" : "=a" (result) : "Nd" (_port));
                     return result;
+#endif
                 }
 
                 static inline void Write32(os::common::uint16_t _port, os::common::uint32_t _data)
                 {
+#ifdef __EMSCRIPTEN__
+                    // Web version - do nothing
+                    (void)_port;
+                    (void)_data;
+#else
                     __asm__ volatile("outl %0, %1" : : "a"(_data), "Nd" (_port));
+#endif
                 }
         };
 

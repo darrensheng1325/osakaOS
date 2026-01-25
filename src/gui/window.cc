@@ -1,4 +1,5 @@
 #include <gui/window.h>
+#include <new>
 
 using namespace os;
 using namespace os::common;

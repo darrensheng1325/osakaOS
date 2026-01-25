@@ -3,6 +3,10 @@
 #include <memorymanagement.h>
 #include <art.h>
 #include <hardwarecommunication/interrupts.h>
+#include <new>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include <hardwarecommunication/pci.h>
 #include <drivers/driver.h>
 #include <drivers/keyboard.h>
@@ -41,6 +45,14 @@
 #include <mode/space.h>
 #include <math.h>
 
+#ifdef __EMSCRIPTEN__
+// Forward declaration for web version of printf (C linkage)
+extern "C" {
+    void printf(char* strChr);
+}
+void printfLine(const char* str, uint8_t line);
+void printfHex(uint8_t key);
+#endif
 
 using namespace os;
 using namespace os::common;
@@ -135,6 +147,7 @@ uint16_t setTextColor(bool set, uint16_t color = 0x07) {
 
 
 //the main print function for textmode
+#ifndef __EMSCRIPTEN__
 void printf(char* strChr) {
 	
 	static uint8_t x = 0, y = 0;
@@ -233,8 +246,10 @@ void printf(char* strChr) {
 		}
 	}
 }
+#endif // __EMSCRIPTEN__
 
 
+#ifndef __EMSCRIPTEN__
 void printfLine(const char* str, uint8_t line) {
 
 	for (uint16_t i = 0; str[i] != '\0'; i++) {
@@ -243,11 +258,12 @@ void printfLine(const char* str, uint8_t line) {
 		*vidmem = str[i] | 0x700;
 	}
 }
+#endif // __EMSCRIPTEN__
 
 
 
+#ifndef __EMSCRIPTEN__
 void printfHex(uint8_t key) {
-
 	char* foo = "00 ";
 	char* hex = "0123456789ABCDEF";
 
@@ -255,6 +271,7 @@ void printfHex(uint8_t key) {
 	foo[1] = hex[key & 0x0F];
 	printf(foo);
 }
+#endif // __EMSCRIPTEN__
 
 
 
@@ -685,22 +702,30 @@ double getTicks() {
 	Port8Bit cmdPort(0x43);
 	Port8Bit channel0(0x40);
 
+#ifndef __EMSCRIPTEN__
 	asm("cli");
+#endif
 
 	channel0.Write(1193182/1000);
 	channel0.Write((1193182/1000) >> 8);
 	
+#ifndef __EMSCRIPTEN__
 	asm("sti");
+#endif
 	
 	
+#ifndef __EMSCRIPTEN__
 	asm("cli");
+#endif
 	
 	cmdPort.Write(0x00);
 	
 	uint32_t count = channel0.Read();
 	count |= channel0.Read() << 8;
 	
+#ifndef __EMSCRIPTEN__
 	asm("sti");
+#endif
 
 	return (double)(count);
 }
@@ -769,7 +794,9 @@ uint16_t prng() {
 
 	//PIT pit;
 	
+#ifndef __EMSCRIPTEN__
 	asm("cli");
+#endif
 	
 	Port8Bit cmdPort(0x43);
 	Port8Bit channel0(0x40);
@@ -778,7 +805,9 @@ uint16_t prng() {
 	uint32_t seed = channel0.Read();
 	seed |= channel0.Read() << 8;
 	
+#ifndef __EMSCRIPTEN__
 	asm("sti");
+#endif
 
 
 	
@@ -801,7 +830,9 @@ uint16_t prng() {
 
 void reboot() {
 
+#ifndef __EMSCRIPTEN__
 	asm volatile ("cli");
+#endif
 
 	uint8_t read = 0x02;
 	Port8Bit resetPort(0x64);
@@ -812,7 +843,9 @@ void reboot() {
 	}
 
 	resetPort.Write(0xfe);
+#ifndef __EMSCRIPTEN__
 	asm volatile ("hlt");
+#endif
 }
 
 uint32_t cmosDetectMemory() {
@@ -943,31 +976,75 @@ extern "C" void callConstructors() {
 //extern "C" void kmain(void* multiboot_structure, uint32_t magicnumber) {
 extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 
-	printf("Hello :^)\n");
+#ifdef __EMSCRIPTEN__
+	// Yield early to allow page to render
+	// emscripten_sleep(0);
+#endif
 
-	GlobalDescriptorTable* gdt;
+	// Initialize GDT first
+	GlobalDescriptorTable gdt_instance;
+	GlobalDescriptorTable* gdt = &gdt_instance;
 	TaskManager taskManager(gdt);
 	
+	printf("Hello :^)\n");
+	printf("[KERNEL] kernelMain started\n");
+	
 	//heap manager
-	uint32_t* memupper = (uint32_t*)(((size_t)multiboot_structure) + 8);
-	size_t heap = 4*1024*1024;
-	MemoryManager memoryManager(heap, (*memupper)*1024 - heap - 10*1024);
+	// Safely access multiboot structure at offset 8 (mem_upper field)
+	// Use a safer pointer access method for Emscripten
+	uint32_t memupper_value;
+#ifdef __EMSCRIPTEN__
+	// For Emscripten, use EM_ASM to safely read from the multiboot structure
+	// This avoids pointer validation issues
+	memupper_value = EM_ASM_INT({
+		var ptr = $0;
+		if (!ptr) return 0;
+		try {
+			var heapSize = HEAPU8.length;
+			if (ptr + 8 < 0 || ptr + 8 + 4 > heapSize) {
+				// Out of bounds, return default 8MB
+				return 8192;
+			}
+			// Read uint32_t at offset 8 (little-endian)
+			return HEAPU32[(ptr + 8) >> 2];
+		} catch (e) {
+			// On error, return default 8MB in KB
+			return 8192;
+		}
+	}, multiboot_structure);
+#else
+	uint32_t* memupper = (uint32_t*)(((os::common::size_t)multiboot_structure) + 8);
+	memupper_value = *memupper;
+#endif
+	os::common::size_t heap = 4*1024*1024;
+	MemoryManager memoryManager(heap, memupper_value*1024 - heap - 10*1024);
 
+#ifdef __EMSCRIPTEN__
+	// Yield after memory initialization
+	emscripten_sleep(0);
+#endif
 	
 	InterruptManager interrupts(0x20, gdt, &taskManager);
 	printf("Initializing Hardware, Stage 1\n");
+
+#ifdef __EMSCRIPTEN__
+	// Yield after interrupt manager
+	emscripten_sleep(0);
+#endif
 
 	DriverManager drvManager;
 	
 	//drivers and command line
 	AdvancedTechnologyAttachment ata0m(0x1F0, true);
 	VideoGraphicsArray vga;
+	printf("[KERNEL] VGA driver created\n");
 	OFS_Table table;
 	FileSystem osakaFileSystem(&ata0m, &memoryManager, &table);
 	Compiler compiler(&osakaFileSystem);
 	PIT pit(&interrupts);
 	CMOS cmos;
 	cmos.pit = &pit;
+	printf("[KERNEL] Drivers initialized\n");
 
 	CLIKeyboardEventHandler* kbhandler = (CLIKeyboardEventHandler*)memoryManager.malloc(sizeof(CLIKeyboardEventHandler));
 	new (kbhandler) CLIKeyboardEventHandler(gdt, &taskManager, &memoryManager, &osakaFileSystem, &compiler, &vga, &cmos, &drvManager);
@@ -998,14 +1075,27 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 
 
 	//network
-	amd_am79c973* eth0 = (amd_am79c973*)(drvManager.drivers[3]);
+	amd_am79c973* eth0 = nullptr;
+#ifdef __EMSCRIPTEN__
+	// For web version, check if driver exists before accessing
+	// The network driver might not be available in web builds
+	if (drvManager.numDrivers > 3 && drvManager.drivers[3] != nullptr) {
+		eth0 = (amd_am79c973*)(drvManager.drivers[3]);
+	}
+#else
+	eth0 = (amd_am79c973*)(drvManager.drivers[3]);
 	//amd_am79c973 eth0(PCIController.PCIdev, &interrupts);
 	//drvManager.drivers[3] = &eth0;
+#endif
 
 
 	printf("\nInitializing Hardware, Stage 2\n");
 	drvManager.ActivateAll();
 	
+#ifdef __EMSCRIPTEN__
+	// Yield after driver activation
+	emscripten_sleep(0);
+#endif
 	
 	//network init
 	//IP Address
@@ -1013,35 +1103,55 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	uint32_t ip_be = ((uint32_t)ip4 << 24) | ((uint32_t)ip3 << 16) 
 			| ((uint32_t)ip2 << 8) | (uint32_t)ip1;
 	
-	eth0->SetIPAddress(ip_be);
-	EtherFrameProvider etherframe(eth0);
-	AddressResolutionProtocol arp(&etherframe);    
-
-
-	// IP Address of the default gateway
-	uint8_t gip1 = 10, gip2 = 0, gip3 = 2, gip4 = 2;
-	uint32_t gip_be = ((uint32_t)gip4 << 24) | ((uint32_t)gip3 << 16) 
-			| ((uint32_t)gip2 << 8) | (uint32_t)gip1;
-
-	uint8_t subnet1 = 255, subnet2 = 255, subnet3 = 255, subnet4 = 0;
-	uint32_t subnet_be = ((uint32_t)subnet4 << 24) | ((uint32_t)subnet3 << 16) 
-			| ((uint32_t)subnet2 << 8) | (uint32_t)subnet1;
-		           
-	InternetProtocolProvider ipv4(&etherframe, &arp, gip_be, subnet_be);
-	InternetControlMessageProtocol icmp(&ipv4);
+	// Network initialization - only if eth0 is available
+	EtherFrameProvider* etherframe = nullptr;
+	AddressResolutionProtocol* arp = nullptr;
+	InternetProtocolProvider* ipv4 = nullptr;
+	InternetControlMessageProtocol* icmp = nullptr;
+	Network* network = nullptr;
 	
-	
-	Network network(eth0, &arp, &ipv4, &icmp, gip_be, subnet_be);
-	kbhandler->network = &network;
+	if (eth0 != nullptr) {
+		eth0->SetIPAddress(ip_be);
+		etherframe = new EtherFrameProvider(eth0);
+		arp = new AddressResolutionProtocol(etherframe);
+		
+		// IP Address of the default gateway
+		uint8_t gip1 = 10, gip2 = 0, gip3 = 2, gip4 = 2;
+		uint32_t gip_be = ((uint32_t)gip4 << 24) | ((uint32_t)gip3 << 16) 
+				| ((uint32_t)gip2 << 8) | (uint32_t)gip1;
+
+		uint8_t subnet1 = 255, subnet2 = 255, subnet3 = 255, subnet4 = 0;
+		uint32_t subnet_be = ((uint32_t)subnet4 << 24) | ((uint32_t)subnet3 << 16) 
+				| ((uint32_t)subnet2 << 8) | (uint32_t)subnet1;
+			           
+		ipv4 = new InternetProtocolProvider(etherframe, arp, gip_be, subnet_be);
+		icmp = new InternetControlMessageProtocol(ipv4);
+		
+		network = new Network(eth0, arp, ipv4, icmp, gip_be, subnet_be);
+		kbhandler->network = network;
+	} else {
+		// No network in web version
+		kbhandler->network = nullptr;
+	}
 
 
 	printf("Initializing Hardware, Stage 3\n");
 	interrupts.Activate();
 	
+#ifdef __EMSCRIPTEN__
+	// Yield after interrupt activation
+	emscripten_sleep(0);
+#endif
+	
 	printf("\n\nEverything seems fine.\n");
 
 	interrupts.boot = true;
 	makeBeep(600);
+
+#ifdef __EMSCRIPTEN__
+	// Yield before entering loops
+	emscripten_sleep(0);
+#endif
 
 	//while (1) {}
 	//everything beyond this point is no longer testing/initialization
@@ -1074,6 +1184,8 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	//kbhandler->OnKeyDown('\b');
 	//printf("\v");
 
+	printf("[KERNEL] Entering CLI loop (waiting for key 0x5b)\n");
+	// Note: custom printf only takes one argument, so we can't format the keyValue here
 
 	//this is the command line :D		
 	while (keyboard.handler->keyValue != 0x5b) { //0x5b = command/windows key	
@@ -1086,7 +1198,17 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 			kbhandler->modeSelect(kbhandler->cliMode, kbhandler->pressed, 
 					kbhandler->keyChar, kbhandler->ctrl, 0, 
 					&osakaFileSystem);
+			
+#ifdef __EMSCRIPTEN__
+			// Yield to browser event loop to prevent blocking
+			emscripten_sleep(0);
+#endif
 		}
+		
+#ifdef __EMSCRIPTEN__
+		// Yield to browser event loop to prevent blocking
+		emscripten_sleep(1);
+#endif
 	}
 	kbhandler->cli = true;
 	kbhandler->gui = true;
@@ -1097,15 +1219,23 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	drvManager.Replace(&keyboardDesktop, 0);
 
 	desktop.CreateChild(1, "Osaka's Terminal", kbhandler);
+	printf("[KERNEL] Desktop created\n");
 	
 	
 	//add task for drawing desktop
 	LoadDesktopForTask(true, &desktop);
 	Task guiTask(gdt, DrawDesktopTask, "osakaOS GUI", 0);
 	taskManager.AddTask(&guiTask);
+	printf("[KERNEL] GUI task added\n");
 
+	// Draw something to test the canvas
+	printf("[KERNEL] Testing canvas rendering...\n");
+	vga.FillRectangle(0, 0, 320, 200, 0x01); // Fill with blue
+	vga.DrawToScreen();
+	printf("[KERNEL] Test draw completed\n");
 	
 	//this is the gui :)
+	printf("[KERNEL] Entering GUI loop\n");
 	while (1) {
 	
 		//this is the loop where the kernel
@@ -1113,6 +1243,10 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 		//to the taskmanager, godspeed o7
 		//			      /|
 		//			      / \
-
+	
+#ifdef __EMSCRIPTEN__
+		// Yield to browser event loop to prevent blocking
+		emscripten_sleep(0);
+#endif
 	}
 }

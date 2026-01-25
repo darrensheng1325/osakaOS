@@ -5,8 +5,13 @@ using namespace os::common;
 using namespace os::net;
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+void printfHex(uint8_t);
+#else
 void printf(char*);
 void printfHex(uint8_t);
+#endif
 
 
 InternetControlMessageProtocol::InternetControlMessageProtocol(InternetProtocolProvider* backend) 

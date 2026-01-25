@@ -5,6 +5,16 @@ using namespace os::common;
 
 
 GlobalDescriptorTable::GlobalDescriptorTable()
+#ifdef __EMSCRIPTEN__
+// For Emscripten, GDT is not needed (no x86 segmentation)
+// Just initialize members to zero/default values
+: nullSegmentSelector(0, 0, 0),
+unusedSegmentSelector(0, 0, 0),
+codeSegmentSelector(0, 0, 0),
+dataSegmentSelector(0, 0, 0) {
+	// No-op for web builds
+}
+#else
 : nullSegmentSelector(0, 0, 0),
 unusedSegmentSelector(0, 0, 0),
 codeSegmentSelector(0, 64*1024*1024, 0x9A),
@@ -16,6 +26,7 @@ dataSegmentSelector(0, 64*1024*1024, 0x92) {
 
 	asm volatile("lgdt (%0)": :"p" (((uint8_t *) i) + 2));
 }
+#endif
 
 
 
@@ -25,21 +36,51 @@ GlobalDescriptorTable::~GlobalDescriptorTable() {
 
 
 uint16_t GlobalDescriptorTable::DataSegmentSelector() {
-
+#ifdef __EMSCRIPTEN__
+	// Return a dummy value for web builds
+	return 0x10;
+#else
 	return (uint8_t*)&dataSegmentSelector - (uint8_t*)this;
+#endif
 }
 
 
 
 uint16_t GlobalDescriptorTable::CodeSegmentSelector() {
-
+#ifdef __EMSCRIPTEN__
+	// Return a dummy value for web builds
+	return 0x08;
+#else
 	return (uint8_t*)&codeSegmentSelector - (uint8_t*)this;
+#endif
 }
 
 
 
 GlobalDescriptorTable::SegmentDescriptor::SegmentDescriptor(uint32_t base, uint32_t limit, uint8_t flags) {
 
+#ifdef __EMSCRIPTEN__
+	// For Emscripten, use member access instead of pointer arithmetic
+	// to avoid memory validation issues
+	limit_lo = limit & 0xFFFF;
+	base_lo = base & 0xFFFF;
+	base_hi = (base >> 16) & 0xFF;
+	type = flags;
+	
+	if (limit <= 65536) {
+		flags_limit_hi = 0x40 | ((limit >> 16) & 0xF);
+	} else {
+		if ((limit & 0xFFF) != 0xFFF) {
+			limit = (limit >> 12) - 1;
+		} else {
+			limit = limit >> 12;
+		}
+		flags_limit_hi = 0xC0 | ((limit >> 16) & 0xF);
+		limit_lo = limit & 0xFFFF;
+	}
+	
+	base_vhi = (base >> 24) & 0xFF;
+#else
 	uint8_t* target = (uint8_t*)this;
 
 	if (limit <= 65536)  {
@@ -68,6 +109,7 @@ GlobalDescriptorTable::SegmentDescriptor::SegmentDescriptor(uint32_t base, uint3
 	target[7] = (base >> 24) & 0xFF;
 
 	target[5] = flags;
+#endif
 }
 
 

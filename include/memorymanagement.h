@@ -2,6 +2,7 @@
 #define __OS__MEMORYMANAGEMENT_H
 
 #include <common/types.h>
+#include <stddef.h>
 
 
 
@@ -37,13 +38,10 @@ namespace os {
 }
 
 
-void* operator new(unsigned size);
-void* operator new[](unsigned size);
+void* operator new(size_t size);
+void* operator new[](size_t size);
 
-// placement new
-void* operator new(unsigned size, void* ptr);
-void* operator new[](unsigned size, void* ptr);
-
+// Note: placement new is provided by the standard library, no need to redeclare
 
 void operator delete(void* ptr);
 void operator delete[](void* ptr);

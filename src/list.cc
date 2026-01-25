@@ -1,4 +1,5 @@
 #include <list.h>
+#include <new>
 
 using namespace os;
 using namespace os::common;
