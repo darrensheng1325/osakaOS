@@ -792,11 +792,16 @@ void makeBeep(uint32_t freq) {
 
 uint16_t prng() {
 
+#ifdef __EMSCRIPTEN__
+	// Use JavaScript Math.random() for web version
+	// This ensures we get proper random numbers
+	return (uint16_t)EM_ASM_INT({
+		return Math.floor(Math.random() * 65536);
+	});
+#else
 	//PIT pit;
 	
-#ifndef __EMSCRIPTEN__
 	asm("cli");
-#endif
 	
 	Port8Bit cmdPort(0x43);
 	Port8Bit channel0(0x40);
@@ -805,12 +810,8 @@ uint16_t prng() {
 	uint32_t seed = channel0.Read();
 	seed |= channel0.Read() << 8;
 	
-#ifndef __EMSCRIPTEN__
 	asm("sti");
-#endif
 
-
-	
 	uint16_t lfsr = (uint16_t)seed;
 	uint16_t period = 0;
 
@@ -825,6 +826,7 @@ uint16_t prng() {
 	
 
 	return lfsr;
+#endif
 }
 
 
@@ -845,6 +847,11 @@ void reboot() {
 	resetPort.Write(0xfe);
 #ifndef __EMSCRIPTEN__
 	asm volatile ("hlt");
+#endif
+#ifdef __EMSCRIPTEN__
+	EM_ASM({
+		window.location.reload();
+	});
 #endif
 }
 

@@ -1,7 +1,7 @@
 # Emscripten Makefile for osakaOS
 
 EMCC = emcc
-EMCCFLAGS = -Iinclude -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 \
+EMCCFLAGS = -Iinclude -s WASM=0 -s ALLOW_MEMORY_GROWTH=1 \
 	-s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","callMain"]' \
 	-s EXPORTED_FUNCTIONS='["_main","_malloc","_free","_kernelMain","_printf","_putcharTUI","_shouldContinueCLILoop","_setCLILoopActive","_shouldContinueGUILoop","_setGUILoopActive","_web_yield","_handleMouseDown","_handleMouseUp","_handleMouseMove","_handleKeyDown","_handleKeyUp","_setKeyboardModifiers"]' \
 	-s INITIAL_MEMORY=67108864 \
@@ -9,7 +9,6 @@ EMCCFLAGS = -Iinclude -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 \
 	-s USE_WEBGL2=0 \
 	-s NO_EXIT_RUNTIME=1 \
 	-s ASYNCIFY=1 \
-	-g4 \
 	--no-entry
 
 # Source files (excluding assembly and hardware-specific files that need stubs)

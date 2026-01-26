@@ -42,7 +42,7 @@ static void kernel_main_loop() {
 extern "C" int main() {
     // Create a fake multiboot structure for web
     static uint32_t mb[16] = {0};
-    mb[1] = 0x100000; // Memory upper bound (1MB)
+    mb[1] = 0x2400000; // Memory upper bound (24MB)
     fake_multiboot = mb;
     
     // Set up main loop to run kernel
