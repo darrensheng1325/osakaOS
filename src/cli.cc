@@ -767,8 +767,92 @@ void iframe(char* args, CommandLine* cli) {
 		cli->PrintCommand("This command is not available in text mode.\n");
 	}
 }
+
+void favicon(char* args, CommandLine* cli) {
+	// Extract URL from args
+	char* url = argparse(args, 0);
+	
+	if (strlen(url) < 1) {
+		cli->PrintCommand("Usage: favicon <url>\n");
+		cli->PrintCommand("Example: favicon https://example.com/favicon.ico\n");
+		return;
+	}
+	
+	// Change favicon using JavaScript
+	EM_ASM_({
+		var urlPtr = $0;
+		var url = '';
+		
+		// Read URL from WASM memory
+		var i = 0;
+		while (HEAPU8[urlPtr + i] !== 0 && i < 256) {
+			url += String.fromCharCode(HEAPU8[urlPtr + i]);
+			i++;
+		}
+		
+		// Remove existing favicon links
+		var existingLinks = document.querySelectorAll("link[rel*='icon']");
+		for (var j = 0; j < existingLinks.length; j++) {
+			existingLinks[j].remove();
+		}
+		
+		// Create new favicon link
+		var link = document.createElement('link');
+		link.rel = 'icon';
+		link.type = 'image/x-icon';
+		link.href = url;
+		document.head.appendChild(link);
+		
+		console.log('[CLI] Favicon changed to:', url);
+	}, (uintptr_t)url);
+	
+	cli->PrintCommand("Favicon changed to: ");
+	cli->PrintCommand(url);
+	cli->PrintCommand("\n");
+}
+
+void title(char* args, CommandLine* cli) {
+	// Extract title from args
+	char* titleStr = argparse(args, 0);
+	
+	if (strlen(titleStr) < 1) {
+		cli->PrintCommand("Usage: title <text>\n");
+		cli->PrintCommand("Example: title My Custom OS Title\n");
+		return;
+	}
+	
+	// Change page title using JavaScript
+	EM_ASM_({
+		var titlePtr = $0;
+		var title = '';
+		
+		// Read title from WASM memory
+		var i = 0;
+		while (HEAPU8[titlePtr + i] !== 0 && i < 256) {
+			title += String.fromCharCode(HEAPU8[titlePtr + i]);
+			i++;
+		}
+		
+		// Change document title
+		document.title = title;
+		
+		console.log('[CLI] Page title changed to:', title);
+	}, (uintptr_t)titleStr);
+	
+	cli->PrintCommand("Page title changed to: ");
+	cli->PrintCommand(titleStr);
+	cli->PrintCommand("\n");
+}
 #else
 void iframe(char* args, CommandLine* cli) {
+	cli->PrintCommand("This command is only available in the web version.\n");
+}
+
+void favicon(char* args, CommandLine* cli) {
+	cli->PrintCommand("This command is only available in the web version.\n");
+}
+
+void title(char* args, CommandLine* cli) {
 	cli->PrintCommand("This command is only available in the web version.\n");
 }
 #endif
@@ -1935,6 +2019,8 @@ void CommandLine::hash_cli_init() {
 #ifdef __EMSCRIPTEN__
 	this->hash_add("settings", settings);
 	this->hash_add("iframe", iframe);
+	this->hash_add("favicon", favicon);
+	this->hash_add("title", title);
 #endif
 	this->hash_add("window", window);
 	this->hash_add("shortcut", shortcut);
