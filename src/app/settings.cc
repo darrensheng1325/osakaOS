@@ -152,16 +152,39 @@ void Settings::DrawSettingsUI(GraphicsContext* gc, CompositeWidget* widget) {
 				gc->PutText("Proxy URL:", startX, contentY, 0x3f);
 				contentY += 12;
 				
+				// Clear area for proxy text display (to prevent leftover characters)
+				gc->FillRectangle(startX + 10, contentY, 180, 12, 0x07);
+				
 				if (strlen(iframeProxy) > 0) {
-					// Show first 30 chars of proxy
-					char displayProxy[31];
+					// Show proxy text (up to 30 chars to fit in window)
 					int len = strlen(iframeProxy);
-					if (len > 30) len = 30;
-					for (int i = 0; i < len; i++) {
-						displayProxy[i] = iframeProxy[i];
+					int displayLen = (len > 30) ? 30 : len;
+					
+					// Build display string - ensure proper null termination
+					char displayProxy[31];
+					for (int i = 0; i < displayLen; i++) {
+						char ch = iframeProxy[i];
+						if (ch >= 32 && ch < 127 && ch != '\0') { // Printable ASCII
+							displayProxy[i] = ch;
+						} else {
+							displayProxy[i] = '?'; // Replace non-printable with ?
+						}
 					}
-					displayProxy[len] = '\0';
-					gc->PutText(displayProxy, startX + 10, contentY, 0x3f);
+					displayProxy[displayLen] = '\0';
+					
+					// Display the text in black (0x00) on light background (0x07)
+					// Font width is 6 pixels per character
+					gc->PutText(displayProxy, startX + 10, contentY, 0x00);
+					
+					// Show cursor indicator (blinking would require frame counter, but static is fine)
+					// Font width is 6 pixels per character
+					if (len <= 30) {
+						// Draw a small vertical line as cursor in black
+						gc->FillRectangle(startX + 10 + displayLen * 6, contentY + 2, 1, 8, 0x00);
+					} else {
+						// Show "..." indicator if text is truncated
+						gc->PutText("...", startX + 10 + 27 * 6, contentY, 0x00);
+					}
 				} else {
 					gc->PutText("(none)", startX + 10, contentY, 0x07);
 				}

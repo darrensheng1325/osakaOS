@@ -1329,7 +1329,29 @@
             
             var iframe = document.createElement('iframe');
             iframe.id = iframeIdStr;
-            iframe.src = url;
+            
+            // Apply proxy if available and URL is not same-origin
+            var finalUrl = url;
+            if (proxy && proxy.length > 0) {
+                // Check if URL is same-origin (simple check - if it starts with http/https and different origin)
+                try {
+                    var urlObj = new URL(url, window.location.href);
+                    var currentOrigin = window.location.origin;
+                    if (urlObj.origin !== currentOrigin) {
+                        // Cross-origin, apply proxy
+                        finalUrl = proxy + encodeURIComponent(url);
+                        console.log('[IframeApp JS] Using proxy:', finalUrl);
+                    } else {
+                        console.log('[IframeApp JS] Same-origin URL, not using proxy');
+                    }
+                } catch(e) {
+                    // If URL parsing fails, assume cross-origin and apply proxy
+                    finalUrl = proxy + encodeURIComponent(url);
+                    console.log('[IframeApp JS] URL parse failed, using proxy:', finalUrl);
+                }
+            }
+            
+            iframe.src = finalUrl;
             iframe.style.position = 'absolute';
             iframe.style.border = 'none';
             iframe.style.pointerEvents = 'auto';
