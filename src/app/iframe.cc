@@ -30,31 +30,37 @@ IframeApp::IframeApp(char* urlStr) {
 IframeApp::~IframeApp() {
 #ifdef __EMSCRIPTEN__
 	// Remove iframe and cleanup when app is destroyed
-	EM_ASM_({
-		var iframeId = 'osaka_iframe_' + $0;
-		var captureCanvasId = 'osaka_capture_' + $0;
-		
-		// Stop intervals
-		if (Module.iframeApps && Module.iframeApps[iframeId]) {
-			if (Module.iframeApps[iframeId].captureInterval) {
-				clearInterval(Module.iframeApps[iframeId].captureInterval);
+	// Note: Close() should be called first, but this is a safety net
+	if (this->iframeId != 0) {
+		EM_ASM_({
+			var iframeId = $0; // Numeric ID used as key in Module.iframeApps
+			var iframeIdStr = 'osaka_iframe_' + iframeId;
+			var captureCanvasId = 'osaka_capture_' + iframeId;
+			
+			console.log('[IframeApp C++] Destructor called, cleaning up iframe:', iframeId);
+			
+			// Stop intervals - use numeric ID as key
+			if (Module.iframeApps && Module.iframeApps[iframeId]) {
+				if (Module.iframeApps[iframeId].captureInterval) {
+					clearInterval(Module.iframeApps[iframeId].captureInterval);
+				}
+				if (Module.iframeApps[iframeId].positionInterval) {
+					clearInterval(Module.iframeApps[iframeId].positionInterval);
+				}
+				delete Module.iframeApps[iframeId];
 			}
-			if (Module.iframeApps[iframeId].positionInterval) {
-				clearInterval(Module.iframeApps[iframeId].positionInterval);
+			
+			// Remove DOM elements using string IDs
+			var iframe = document.getElementById(iframeIdStr);
+			if (iframe) {
+				iframe.parentNode.removeChild(iframe);
 			}
-			delete Module.iframeApps[iframeId];
-		}
-		
-		// Remove DOM elements
-		var iframe = document.getElementById(iframeId);
-		if (iframe) {
-			iframe.parentNode.removeChild(iframe);
-		}
-		var canvas = document.getElementById(captureCanvasId);
-		if (canvas) {
-			canvas.parentNode.removeChild(canvas);
-		}
-	}, this->iframeId);
+			var canvas = document.getElementById(captureCanvasId);
+			if (canvas) {
+				canvas.parentNode.removeChild(canvas);
+			}
+		}, this->iframeId);
+	}
 #endif
 }
 
@@ -129,7 +135,52 @@ void IframeApp::ReadInput(char* file, CompositeWidget* widget, FileSystem* files
 }
 
 void IframeApp::Close() {
-	// Cleanup handled in destructor
+	// Explicitly cleanup iframe when window is closed
+#ifdef __EMSCRIPTEN__
+	if (this->iframeId != 0) {
+		EM_ASM_({
+			var iframeId = $0; // Numeric ID used as key in Module.iframeApps
+			var iframeIdStr = 'osaka_iframe_' + iframeId;
+			var captureCanvasId = 'osaka_capture_' + iframeId;
+			
+			console.log('[IframeApp C++] Close() called, cleaning up iframe:', iframeId, 'string:', iframeIdStr);
+			
+			// Stop intervals - use numeric ID as key (matches how it's stored in setupIframeApp)
+			if (Module.iframeApps && Module.iframeApps[iframeId]) {
+				if (Module.iframeApps[iframeId].captureInterval) {
+					clearInterval(Module.iframeApps[iframeId].captureInterval);
+					console.log('[IframeApp C++] Cleared captureInterval');
+				}
+				if (Module.iframeApps[iframeId].positionInterval) {
+					clearInterval(Module.iframeApps[iframeId].positionInterval);
+					console.log('[IframeApp C++] Cleared positionInterval');
+				}
+				delete Module.iframeApps[iframeId];
+				console.log('[IframeApp C++] Deleted iframeApps entry');
+			} else {
+				console.warn('[IframeApp C++] iframeApps entry not found for ID:', iframeId);
+			}
+			
+			// Remove DOM elements using string IDs
+			var iframe = document.getElementById(iframeIdStr);
+			if (iframe) {
+				iframe.parentNode.removeChild(iframe);
+				console.log('[IframeApp C++] Removed iframe element');
+			} else {
+				console.warn('[IframeApp C++] Iframe element not found:', iframeIdStr);
+			}
+			var canvas = document.getElementById(captureCanvasId);
+			if (canvas) {
+				canvas.parentNode.removeChild(canvas);
+				console.log('[IframeApp C++] Removed capture canvas element');
+			} else {
+				console.warn('[IframeApp C++] Capture canvas not found:', captureCanvasId);
+			}
+		}, this->iframeId);
+	}
+	this->initialized = false;
+	this->iframeId = 0;
+#endif
 }
 
 void IframeApp::OnKeyDown(char ch, CompositeWidget* widget) {

@@ -73,7 +73,7 @@
             image-rendering: crisp-edges;
             background: #000;
             display: none; /* Hidden by default, shown when graphics mode is active */
-            object-fit: cover; /* Fill entire screen, may crop edges */
+            object-fit: contain; /* Show full canvas without cropping */
             cursor: none; /* Hide cursor on graphics canvas */
             position: fixed !important;
             top: 0 !important;
@@ -1319,6 +1319,10 @@
             if (existingCanvas) existingCanvas.parentNode.removeChild(existingCanvas);
             
             // Create iframe - will be positioned based on same-origin vs cross-origin
+            // Window content area is (widgetW - 1) x (widgetH - 10) to account for borders/header
+            var contentW = Math.max(1, widgetW - 1);
+            var contentH = Math.max(1, widgetH - 10);
+            
             var iframe = document.createElement('iframe');
             iframe.id = iframeIdStr;
             iframe.src = url;
@@ -1329,15 +1333,16 @@
             iframe.style.visibility = 'hidden';
             iframe.style.left = '-9999px';
             iframe.style.top = '-9999px';
-            iframe.style.width = widgetW + 'px';
-            iframe.style.height = widgetH + 'px';
+            // Set initial size to content area size (will be updated for cross-origin iframes)
+            iframe.style.width = contentW + 'px';
+            iframe.style.height = contentH + 'px';
             iframe.style.zIndex = '1000';
             
-            // Create capture canvas
+            // Create capture canvas - use content area size
             var captureCanvas = document.createElement('canvas');
             captureCanvas.id = captureCanvasId;
-            captureCanvas.width = widgetW;
-            captureCanvas.height = widgetH;
+            captureCanvas.width = contentW;
+            captureCanvas.height = contentH;
             captureCanvas.style.position = 'absolute';
             captureCanvas.style.left = '-9999px';
             captureCanvas.style.top = '-9999px';
@@ -1355,7 +1360,9 @@
                 widgetX: widgetX,
                 widgetY: widgetY,
                 widgetW: widgetW,
-                widgetH: widgetH
+                widgetH: widgetH,
+                contentW: contentW,
+                contentH: contentH
             };
             
             // Start capture when iframe loads
@@ -1388,11 +1395,13 @@
                                 var iframeDoc = app.iframe.contentDocument || app.iframe.contentWindow.document;
                                 if (iframeDoc && iframeDoc.body) {
                                     // Same-origin: try to capture using html2canvas if available
+                                    var cw = app.contentW || (app.widgetW - 1);
+                                    var ch = app.contentH || (app.widgetH - 10);
                                     if (typeof html2canvas !== 'undefined') {
                                         html2canvas(iframeDoc.body, {
                                             canvas: app.captureCanvas,
-                                            width: app.widgetW,
-                                            height: app.widgetH,
+                                            width: cw,
+                                            height: ch,
                                             scale: 1,
                                             useCORS: true
                                         }).then(function(canvas) {
@@ -1401,7 +1410,7 @@
                                             console.log('[IframeApp] html2canvas error:', e);
                                             // Fallback: draw placeholder
                                             ctx.fillStyle = '#333';
-                                            ctx.fillRect(0, 0, app.widgetW, app.widgetH);
+                                            ctx.fillRect(0, 0, cw, ch);
                                             ctx.fillStyle = '#fff';
                                             ctx.font = '12px monospace';
                                             ctx.fillText('Capture failed', 10, 20);
@@ -1409,11 +1418,11 @@
                                     } else {
                                         // No html2canvas: try direct drawImage
                                         try {
-                                            ctx.drawImage(app.iframe, 0, 0, app.widgetW, app.widgetH);
+                                            ctx.drawImage(app.iframe, 0, 0, cw, ch);
                                         } catch(e) {
                                             // Fallback: render iframe body to canvas manually
                                             ctx.fillStyle = '#333';
-                                            ctx.fillRect(0, 0, app.widgetW, app.widgetH);
+                                            ctx.fillRect(0, 0, cw, ch);
                                             ctx.fillStyle = '#fff';
                                             ctx.font = '12px monospace';
                                             ctx.fillText('Iframe loaded', 10, 20);
@@ -1447,18 +1456,44 @@
                         if (!canvas) return;
                         
                         var canvasRect = canvas.getBoundingClientRect();
-                        var scaleX = canvasRect.width / 320;
-                        var scaleY = canvasRect.height / 200;
+                        
+                        // Calculate actual rendered size accounting for object-fit: contain
+                        // The canvas maintains 320:200 aspect ratio (1.6:1)
+                        var canvasAspect = 320 / 200; // 1.6
+                        var viewportAspect = canvasRect.width / canvasRect.height;
+                        
+                        var renderedWidth, renderedHeight, offsetX, offsetY;
+                        
+                        if (viewportAspect > canvasAspect) {
+                            // Viewport is wider - letterboxing (black bars on sides)
+                            // Canvas height fills viewport, width is scaled down
+                            renderedHeight = canvasRect.height;
+                            renderedWidth = renderedHeight * canvasAspect;
+                            offsetX = (canvasRect.width - renderedWidth) / 2;
+                            offsetY = 0;
+                        } else {
+                            // Viewport is taller - pillarboxing (black bars on top/bottom)
+                            // Canvas width fills viewport, height is scaled down
+                            renderedWidth = canvasRect.width;
+                            renderedHeight = renderedWidth / canvasAspect;
+                            offsetX = 0;
+                            offsetY = (canvasRect.height - renderedHeight) / 2;
+                        }
+                        
+                        // Calculate scale factors based on actual rendered size
+                        var scaleX = renderedWidth / 320;
+                        var scaleY = renderedHeight / 200;
                         
                         // Calculate screen position for the window content area
                         // Window content starts at (widgetX + 1, widgetY + 10) with size (widgetW - 1, widgetH - 10)
                         var contentX = app.widgetX + 1;
                         var contentY = app.widgetY + 10;
-                        var contentW = Math.max(1, app.widgetW - 1);
-                        var contentH = Math.max(1, app.widgetH - 10);
+                        var contentW = app.contentW || Math.max(1, app.widgetW - 1);
+                        var contentH = app.contentH || Math.max(1, app.widgetH - 10);
                         
-                        var screenX = canvasRect.left + (contentX * scaleX);
-                        var screenY = canvasRect.top + (contentY * scaleY);
+                        // Position relative to the rendered canvas area (accounting for letterboxing/pillarboxing)
+                        var screenX = canvasRect.left + offsetX + (contentX * scaleX);
+                        var screenY = canvasRect.top + offsetY + (contentY * scaleY);
                         var screenW = Math.max(1, contentW * scaleX);
                         var screenH = Math.max(1, contentH * scaleY);
                         
@@ -1524,7 +1559,10 @@
             var ctx = captureCanvas.getContext('2d');
             
             // Check if canvas has any content
-            var imageData = ctx.getImageData(0, 0, app.widgetW, app.widgetH);
+            // Use content dimensions for capture
+            var captureW = app.contentW || (app.widgetW - 1);
+            var captureH = app.contentH || (app.widgetH - 10);
+            var imageData = ctx.getImageData(0, 0, captureW, captureH);
             var data = imageData.data;
             
             // Check if canvas is all white/empty
@@ -1540,13 +1578,13 @@
                 console.log('[IframeApp JS] Canvas is empty, drawing placeholder');
                 // Canvas is empty/white - fill with a test pattern to verify buffer writing works
                 ctx.fillStyle = '#444';
-                ctx.fillRect(0, 0, app.widgetW, app.widgetH);
+                ctx.fillRect(0, 0, captureW, captureH);
                 ctx.fillStyle = '#fff';
                 ctx.font = '12px monospace';
                 ctx.fillText('Loading iframe...', 10, 20);
-                ctx.fillText('Size: ' + app.widgetW + 'x' + app.widgetH, 10, 35);
+                ctx.fillText('Size: ' + captureW + 'x' + captureH, 10, 35);
                 // Re-read image data after drawing
-                imageData = ctx.getImageData(0, 0, app.widgetW, app.widgetH);
+                imageData = ctx.getImageData(0, 0, captureW, captureH);
                 data = imageData.data;
             }
             
@@ -1560,12 +1598,14 @@
             // The buffer is 320x200, and we write starting at (offsetX, offsetY) with size (contentW, contentH)
             // The buffer index calculation is: (y << 8) + (y << 6) + x = y * 320 + x
             var pixelsWritten = 0;
-            var maxX = Math.min(contentW, app.widgetW);
-            var maxY = Math.min(contentH, app.widgetH);
+            var captureW = app.contentW || (app.widgetW - 1);
+            var captureH = app.contentH || (app.widgetH - 10);
+            var maxX = Math.min(contentW, captureW);
+            var maxY = Math.min(contentH, captureH);
             
             for (var y = 0; y < maxY && (offsetY + y) < 200; y++) {
                 for (var x = 0; x < maxX && (offsetX + x) < 320; x++) {
-                    var srcIdx = (y * app.widgetW + x) * 4;
+                    var srcIdx = (y * captureW + x) * 4;
                     var r = data[srcIdx];
                     var g = data[srcIdx + 1];
                     var b = data[srcIdx + 2];

@@ -240,6 +240,12 @@ void Desktop::Draw(common::GraphicsContext* gc) {
 	} else {
 		//osaka simulator
 		this->osaka->DrawRoom(gc);
+		
+		// Draw escape button in top-right corner for devices without escape key
+		// Button area: 300-320, 5-20 (moved down slightly to avoid being cut off)
+		gc->FillRectangle(300, 5, 320, 20, 0x04); // Red background
+		gc->DrawRectangle(300, 5, 320, 20, 0x3f); // White border
+		gc->PutText("ESC", 302, 8, 0x3f); // White text
 	}
 	gc->MakeDark(this->osaka->darkLevel);
 	gc->MakeWave(this->osaka->waveLength);
@@ -423,10 +429,39 @@ void Desktop::Screenshot() {
 
 void Desktop::OnMouseDown(common::uint8_t button) {
 
-	if (this->osaka->sim) { this->osaka->OnMouseDown(MouseX, MouseY, button);
+	if (this->osaka->sim) { 
+		// Check if clicking on escape button (top-right corner: 300-320, 5-20)
+		if (button == 1 && MouseX >= 300 && MouseX < 320 && MouseY >= 5 && MouseY < 20) {
+			// Send escape key to exit simulator
+			this->osaka->OnKeyDown(0x1b);
+		} else {
+			this->osaka->OnMouseDown(MouseX, MouseY, button);
+		}
 	} else {
-		// Set mouse start click flag (replaces 0x5b key)
-		if (button == 1) { // Left mouse button
+		// Check if clicking on empty desktop (not on windows, buttons, or taskbar)
+		bool clickedOnWindow = false;
+		bool clickedOnButton = false;
+		
+		// Check if clicking on a window
+		for (int i = 0; i < numChildren; i++) {
+			if (this->children[i]->ContainsCoordinate(MouseX, MouseY)) {
+				clickedOnWindow = true;
+				break;
+			}
+		}
+		
+		// Check if clicking on a desktop button
+		for (int i = 0; i < this->buttons->numOfNodes; i++) {	
+			DesktopButton* dbutton = (DesktopButton*)(this->buttons->Read(i));
+			if (dbutton->ContainsCoordinate(MouseX, MouseY)) {
+				clickedOnButton = true;
+				break;
+			}
+		}
+		
+		// Only toggle simulator if clicking on empty desktop (not on windows, buttons, or taskbar)
+		if (button == 1 && !clickedOnWindow && !clickedOnButton && 
+		    !(MouseY >= 190 && this->taskbar)) {
 			this->mouseStartClick = true;
 		}
 		
