@@ -1,5 +1,8 @@
 #include <filesys/ofs.h>
 #include <new>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 using namespace os;
 using namespace os::common;
@@ -57,6 +60,25 @@ FileSystem::FileSystem(AdvancedTechnologyAttachment* ata0m,
 		char fileName[33];
 		location = this->GetFileName(fileNum, fileName);
 		
+		// Validate file exists before adding to table
+		if (location == 0 || !FileIf(location)) {
+			// Invalid file entry, skip it
+			continue;
+		}
+		
+		// Validate file name is not empty or garbage
+		bool validName = false;
+		for (int i = 0; i < 32; i++) {
+			if (fileName[i] != '\0' && fileName[i] >= 32 && fileName[i] < 127) {
+				validName = true;
+				break;
+			}
+		}
+		if (!validName) {
+			// Invalid file name, skip it
+			continue;
+		}
+		
 		//add to memory table
 		File* file = (File*)(this->memoryManager->malloc(sizeof(File)));
 		new (file) File(location, OFS_BLOCK_SIZE, fileName);
@@ -75,6 +97,83 @@ FileSystem::FileSystem(AdvancedTechnologyAttachment* ata0m,
 
 FileSystem::~FileSystem() {
 }
+
+void FileSystem::RefreshFileTable() {
+	// Clear existing file list
+	if (this->table->files) {
+		// Free existing File objects
+		for (int i = 0; i < this->table->files->numOfNodes; i++) {
+			File* file = (File*)(this->table->files->Read(i));
+			if (file) {
+				this->memoryManager->free(file);
+			}
+		}
+		this->table->files->DestroyList();
+		this->memoryManager->free(this->table->files);
+	}
+	
+	// Re-initialize file table (same logic as constructor)
+	// Read28 is now synchronous, so it will wait for IndexedDB reads to complete
+	this->table->fileCount = GetFileCount();
+	this->table->files = (List*)(this->memoryManager->malloc(sizeof(List)));
+	new (this->table->files) List(this->memoryManager);
+	
+	uint8_t sectorData[512];
+	uint32_t fileSize = 0;
+	uint32_t location = 0;
+	uint32_t totalSize = 0;
+	
+	// Load files into memory table
+	for (uint32_t fileNum = 0; fileNum < this->table->fileCount; fileNum++) {
+		char fileName[33];
+		location = this->GetFileName(fileNum, fileName);
+		
+		// Validate file exists before adding to table
+		if (location == 0 || !FileIf(location)) {
+			continue;
+		}
+		
+		// Validate file name is not empty or garbage
+		bool validName = false;
+		for (int i = 0; i < 32; i++) {
+			if (fileName[i] != '\0' && fileName[i] >= 32 && fileName[i] < 127) {
+				validName = true;
+				break;
+			}
+		}
+		if (!validName) {
+			continue;
+		}
+		
+		// Add to memory table
+		File* file = (File*)(this->memoryManager->malloc(sizeof(File)));
+		new (file) File(location, OFS_BLOCK_SIZE, fileName);
+		this->table->files->Push(file);
+		
+		fileSize = this->GetFileSize(fileName);
+		file->Size = fileSize;
+		totalSize += file->Size;
+	}
+	this->newestLocation = location;
+	
+	if (this->table->fileCount > 0) {
+		this->table->currentOpenSector = location + (fileSize / 512) + 1;
+	} else {
+		this->table->currentOpenSector = tableStartSector + 512;
+	}
+}
+
+#ifdef __EMSCRIPTEN__
+// C function to refresh filesystem from JavaScript
+extern "C" {
+	EMSCRIPTEN_KEEPALIVE void refreshFileSystem(void* filesystemPtr) {
+		if (filesystemPtr) {
+			FileSystem* fs = (FileSystem*)filesystemPtr;
+			fs->RefreshFileTable();
+		}
+	}
+}
+#endif
 
 
 
@@ -346,16 +445,59 @@ uint32_t FileSystem::UpdateTable() {
 
 uint32_t FileSystem::GetFileCount() {
 
-	uint8_t numOfFiles[512];
-	uint32_t fileNum = 0;
+	// Instead of reading a stored count (which may be garbage), 
+	// count valid files by scanning the file table
+	uint32_t validCount = 0;
+	uint8_t sectorData[512];
 	
-	ata0m->Read28(tableStartSector, numOfFiles, 512, 0);
-
-	for (int i = 0; i < 256; i++) {
-	
-		fileNum += numOfFiles[i];
+	// Scan through file table sectors to find valid files
+	// Each sector can hold 128 file entries (4 bytes each)
+	for (uint32_t sectorOffset = 0; sectorOffset < 256; sectorOffset++) { // Max 256 sectors = 32768 files
+		ata0m->Read28(fileStartSector + sectorOffset, sectorData, 512, 0);
+		
+		bool foundValid = false;
+		// Check each entry in this sector (128 entries per sector)
+		for (uint32_t entry = 0; entry < 128; entry++) {
+			uint16_t index = entry * 4;
+			
+			uint32_t location = (sectorData[index] << 24) |
+			                    (sectorData[index+1] << 16) | 
+			                    (sectorData[index+2] << 8) | 
+			                    (sectorData[index+3]);
+			
+			// Only count if location is valid and file actually exists
+			if (location != 0 && FileIf(location)) {
+				validCount++;
+				foundValid = true;
+			} else if (location == 0 && !foundValid && entry == 0) {
+				// First entry in sector is empty, this sector is unused
+				// If we haven't found any valid files yet, we can stop
+				if (sectorOffset == 0) {
+					return 0; // No files at all
+				}
+				// Otherwise, this sector is empty but previous sectors had files
+				// Continue checking in case there are gaps
+			}
+		}
+		
+		// If entire sector is empty (all zeros) and we've found files before,
+		// we can stop (files are stored contiguously)
+		if (!foundValid && validCount > 0 && sectorOffset > 0) {
+			// Check if entire sector is zeros
+			bool allZeros = true;
+			for (int i = 0; i < 512; i++) {
+				if (sectorData[i] != 0) {
+					allZeros = false;
+					break;
+				}
+			}
+			if (allZeros) {
+				break; // Found end of file table
+			}
+		}
 	}
-	return fileNum;
+	
+	return validCount;
 }
 
 

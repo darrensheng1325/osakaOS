@@ -107,10 +107,19 @@ extern "C" {
             // Prevent default browser behavior for most keys to avoid conflicts
             // Allow default for F-keys and some special browser keys
             var preventDefault = true;
-            if (e.key === 'F1' || e.key === 'F2' || e.key === 'F3' || e.key === 'F4' || 
-                e.key === 'F5' || e.key === 'F6' || e.key === 'F7' || e.key === 'F8' ||
+            // F4 and F5 are used by journal for save/read, so prevent browser default
+            if (e.key === 'F1' || e.key === 'F2' || e.key === 'F3' || 
+                e.key === 'F6' || e.key === 'F7' || e.key === 'F8' ||
                 e.key === 'F9' || e.key === 'F10' || e.key === 'F11' || e.key === 'F12') {
-                preventDefault = false; // Allow F-keys for browser dev tools
+                preventDefault = false; // Allow F-keys for browser dev tools (except F4/F5)
+            }
+            // Always prevent F4 and F5 to avoid browser reload/refresh
+            if (e.key === 'F4' || e.key === 'F5') {
+                preventDefault = true;
+            }
+            // Prevent Ctrl+S and Ctrl+O (save/open) when in GUI mode
+            if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S' || e.key === 'o' || e.key === 'O')) {
+                preventDefault = true;
             }
             if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) {
                 preventDefault = true; // Prevent tab navigation, but allow Ctrl+Tab

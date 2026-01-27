@@ -77,7 +77,6 @@ MouseDriver::MouseDriver(InterruptManager* manager, MouseEventHandler* handler)
             canvas.addEventListener('mousedown', function(e) {
                 e.preventDefault(); // Prevent default to allow dragging
                 isMouseDown = true;
-                console.log('[JS] Mouse down event on canvas, handler:', Module._g_mouseHandler);
                 if (!Module._g_mouseHandler) {
                     console.error('[JS] Mouse handler not available!');
                     return;
@@ -126,9 +125,7 @@ MouseDriver::MouseDriver(InterruptManager* manager, MouseEventHandler* handler)
                     canvas.requestPointerLock();
                 }
                 
-                console.log('[JS] Calling handleMouseDown with button:', button, 'x:', x, 'y:', y, 'pointerLocked:', isPointerLocked);
                 Module.ccall('handleMouseDown', null, ['number', 'number', 'number'], [button, x, y]);
-                console.log('[JS] handleMouseDown called');
             });
             
             canvas.addEventListener('mouseup', function(e) {

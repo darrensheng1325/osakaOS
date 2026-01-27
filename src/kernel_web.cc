@@ -47,10 +47,8 @@ extern "C" {
         // Call JavaScript helper function that safely reads and renders the string
         EM_ASM_INT({
             var ptr = $0;
-            console.log('[C] printf called with pointer:', ptr);
             if (Module.safeReadAndPrintString) {
                 Module.safeReadAndPrintString(ptr);
-                console.log('[C] safeReadAndPrintString called');
             } else {
                 console.error('[C] Module.safeReadAndPrintString not found!');
             }

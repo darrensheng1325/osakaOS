@@ -1077,6 +1077,12 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	printf("[KERNEL] VGA driver created\n");
 	OFS_Table table;
 	FileSystem osakaFileSystem(&ata0m, &memoryManager, &table);
+#ifdef __EMSCRIPTEN__
+	// Expose filesystem to JavaScript for IndexedDB refresh callback
+	EM_ASM_({
+		Module._osakaFileSystemPtr = $0;
+	}, &osakaFileSystem);
+#endif
 	Compiler compiler(&osakaFileSystem);
 	PIT pit(&interrupts);
 	CMOS cmos;
@@ -1278,12 +1284,18 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 			desktop.CreateChild(1, "Osaka's Terminal", kbhandler);
 			printf("[KERNEL] Desktop created\n");
 			
-			
-			//add task for drawing desktop
+#ifdef __EMSCRIPTEN__
+			// For Emscripten, we draw directly in the main loop, not via task manager
+			// The task manager relies on timer interrupts which don't work the same way
+			LoadDesktopForTask(true, &desktop);
+			printf("[KERNEL] Desktop loaded for Emscripten (direct draw mode)\n");
+#else
+			//add task for drawing desktop (x86 version uses task manager)
 			LoadDesktopForTask(true, &desktop);
 			Task guiTask(gdt, DrawDesktopTask, "osakaOS GUI", 0);
 			taskManager.AddTask(&guiTask);
 			printf("[KERNEL] GUI task added\n");
+#endif
 
 			// Draw something to test the canvas
 			printf("[KERNEL] Testing canvas rendering...\n");

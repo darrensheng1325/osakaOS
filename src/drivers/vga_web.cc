@@ -503,10 +503,8 @@ void VideoGraphicsArray::DrawToScreen() {
     unsigned int pixelsPtr = reinterpret_cast<unsigned int>(pixels);
     EM_ASM_INT({
         var ptr = $0;
-        console.log('[VGA] DrawToScreen called, pixels pointer:', ptr);
         if (Module.renderPixels) {
             Module.renderPixels(ptr);
-            console.log('[VGA] renderPixels called successfully');
         } else {
             console.error('[VGA] Module.renderPixels not found!');
         }

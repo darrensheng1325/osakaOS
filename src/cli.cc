@@ -394,9 +394,20 @@ void files(char* args, CommandLine* cli) {
 
 	//list all files
 	//go through each file entry and print
-	for (int i = 0; i < fileNum; i++) {
+	// Use the in-memory table instead of GetFileCount to avoid garbage files
+	uint32_t actualFileNum = cli->filesystem->table->fileCount;
+	for (int i = 0; i < actualFileNum; i++) {
 		
-		uint32_t location = cli->filesystem->GetFileName(i, name);
+		// Get file from in-memory table (already validated during initialization)
+		File* file = (File*)(cli->filesystem->table->files->Read(i));
+		if (!file) continue;
+		
+		// Copy file name
+		for (int j = 0; j < 33; j++) {
+			name[j] = file->Name[j];
+		}
+		
+		uint32_t location = file->Location;
 		bool skip = false;
 
 		//list files with given tag(s)

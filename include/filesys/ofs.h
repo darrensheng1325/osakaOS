@@ -71,6 +71,7 @@ namespace os {
 		
 				void UpdateSize(common::uint32_t location, common::uint32_t size);
 				common::uint32_t GetFileCount();
+				void RefreshFileTable(); // Reload files from disk after IndexedDB is ready
 		
 				common::uint32_t GetFileSize(char* name);
 				common::uint32_t SetFileSize(char* name, common::uint32_t size);

@@ -363,11 +363,11 @@
                         // Switch to graphics mode when rendering graphics
                         if (Module.switchToGraphicsMode) {
                             Module.switchToGraphicsMode();
-                            console.log('[JS] Switched to graphics mode (re-attached)');
+                            // console.log('[JS] Switched to graphics mode (re-attached)');
                         } else {
                             console.error('[JS] switchToGraphicsMode not found (re-attached)!');
                         }
-                        console.log('[JS] renderPixels called with pointer:', pixelPtr);
+                        // console.log('[JS] renderPixels called with pointer:', pixelPtr);
                         var canvas = document.getElementById('osaka-canvas');
                         if (!canvas) {
                             console.error('[JS] Canvas not found!');
@@ -410,11 +410,11 @@
                             data[idx + 3] = 255; // Alpha (opacity, 255 = fully opaque)
                         }
                         ctx.putImageData(imageData, 0, 0);
-                        console.log('[JS] renderPixels: pixels rendered to canvas');
+                        // console.log('[JS] renderPixels: pixels rendered to canvas');
                     };
-                    console.log('[JS] renderPixels re-attached');
+                    // console.log('[JS] renderPixels re-attached');
                 } else {
-                    console.log('[JS] renderPixels is available');
+                    // console.log('[JS] renderPixels is available');
                 }
                 if (!Module.putCharTUI) {
                     console.error('[JS] putCharTUI missing after runtime init! Re-attaching...');
@@ -446,9 +446,9 @@
                             ctx.fillText(chStr, x * 8, y * 16);
                         }
                     };
-                    console.log('[JS] putCharTUI re-attached');
+                    // console.log('[JS] putCharTUI re-attached');
                 } else {
-                    console.log('[JS] putCharTUI is available');
+                    // console.log('[JS] putCharTUI is available');
                 }
                 
                 // Re-attach switchToGraphicsMode if missing
@@ -457,19 +457,19 @@
                     Module.switchToGraphicsMode = function() {
                         var textCanvas = document.getElementById('osaka-text-canvas');
                         var graphicsCanvas = document.getElementById('osaka-canvas');
-                        console.log('[JS] switchToGraphicsMode called (re-attached)');
+                        // console.log('[JS] switchToGraphicsMode called (re-attached)');
                         if (textCanvas && graphicsCanvas) {
                             textCanvas.style.display = 'none';
                             graphicsCanvas.style.display = 'block';
-                            console.log('[JS] Canvas switched: text hidden, graphics shown');
-                            console.log('[JS] Graphics canvas computed style:', window.getComputedStyle(graphicsCanvas).display);
+                            // console.log('[JS] Canvas switched: text hidden, graphics shown');
+                            // console.log('[JS] Graphics canvas computed style:', window.getComputedStyle(graphicsCanvas).display);
                         } else {
                             console.error('[JS] Canvas elements not found!', {textCanvas, graphicsCanvas});
                         }
                     };
-                    console.log('[JS] switchToGraphicsMode re-attached');
+                    // console.log('[JS] switchToGraphicsMode re-attached');
                 } else {
-                    console.log('[JS] switchToGraphicsMode is available');
+                    // console.log('[JS] switchToGraphicsMode is available');
                 }
                 
                 var loading = document.getElementById('loading');
