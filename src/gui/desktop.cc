@@ -2,9 +2,11 @@
 #include <new>
 #ifdef __EMSCRIPTEN__
 #include <app/iframe.h>
+#include <app/settings.h>
 extern "C" {
     void printf(char* strChr);
 }
+#include <emscripten.h>
 #endif
 
 using namespace os;
@@ -121,6 +123,15 @@ CompositeWidget* Desktop::CreateChild(uint8_t appType, char* name, App* oldApp) 
 			color = 0x3f;
 			}
 			break;
+		//settings
+		case 5:
+			{
+			Settings* settings = (Settings*)memoryManager->malloc(sizeof(Settings));
+			new (settings) Settings();
+			app = settings;
+			color = 0x3f;
+			}
+			break;
 #endif
 		//create command line
 		//as deafult
@@ -147,6 +158,13 @@ CompositeWidget* Desktop::CreateChild(uint8_t appType, char* name, App* oldApp) 
 	// For iframe apps, use a reasonable size (not too large for 320x200 screen)
 	if (appType == 4) {
 		windowW = 180;
+		windowH = 100;
+	}
+	// For Settings app, make it wider to fit all tabs (Desktop, Windows, Iframes)
+	// Tabs are at positions 1, 61, 121, each 58px wide, so need at least 179px content width
+	// Plus borders (2px) = 181px minimum, use 200px for safety
+	if (appType == 5) {
+		windowW = 200;
 		windowH = 100;
 	}
 	// Calculate random position ensuring window stays within screen bounds (320x200)
@@ -222,7 +240,19 @@ void Desktop::Draw(common::GraphicsContext* gc) {
 	
 	
 	if (this->osaka->sim == false) {
-
+#ifdef __EMSCRIPTEN__
+		// Apply desktop background color setting if available
+		EM_ASM_({
+			if (typeof Module._settings_desktopBg !== 'undefined') {
+				// Fill desktop buffer with the configured color
+				var color = Module._settings_desktopBg;
+				var bufPtr = $0;
+				for (var i = 0; i < 64000; i++) {
+					HEAPU8[bufPtr + i] = color;
+				}
+			}
+		}, (uintptr_t)this->buf);
+#endif
 		//draw background
 		gc->FillBuffer(0, 0, WIDTH_13H, HEIGHT_13H, this->buf, false);
 	

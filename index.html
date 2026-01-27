@@ -1294,6 +1294,10 @@
                 widgetH: widgetH
             });
             
+            // Get iframe settings
+            var displayMode = (Module._settings_iframeMode !== undefined) ? Module._settings_iframeMode : 1; // Default to direct overlay
+            var proxy = (Module._settings_proxy !== undefined) ? Module._settings_proxy : '';
+            
             // Read URL from WASM memory
             var url = '';
             if (urlPtr) {
@@ -1369,6 +1373,9 @@
             iframe.onload = function() {
                 console.log('[IframeApp JS] Iframe loaded:', url);
                 
+                // Check display mode setting
+                var useDirectOverlay = (displayMode === 1);
+                
                 // Check if we can access the iframe content (same-origin check)
                 var canAccess = false;
                 try {
@@ -1381,9 +1388,9 @@
                     canAccess = false;
                 }
                 
-                if (canAccess) {
-                    // Same-origin: capture and render to canvas
-                    console.log('[IframeApp JS] Same-origin iframe, using capture');
+                if (canAccess && !useDirectOverlay) {
+                    // Same-origin and display mode is canvas capture: capture and render to canvas
+                    console.log('[IframeApp JS] Same-origin iframe, using canvas capture mode');
                     var captureFrame = function() {
                         try {
                             var app = Module.iframeApps[iframeId];
@@ -1442,8 +1449,9 @@
                     // Also capture immediately
                     captureFrame();
                 } else {
-                    // Cross-origin: can't capture, but display iframe directly over window
-                    console.log('[IframeApp JS] Cross-origin iframe, displaying directly over window');
+                    // Cross-origin OR display mode is direct overlay: display iframe directly over window
+                    var reason = useDirectOverlay ? 'direct overlay mode' : 'cross-origin';
+                    console.log('[IframeApp JS] Using direct overlay (' + reason + ')');
                     Module.iframeApps[iframeId].isCrossOrigin = true;
                     
                     // Function to update iframe position over the window

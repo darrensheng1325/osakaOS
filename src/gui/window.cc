@@ -1,6 +1,8 @@
 #include <gui/window.h>
 #include <new>
-
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 using namespace os;
 using namespace os::common;
 using namespace os::drivers;
@@ -37,6 +39,20 @@ FileSystem* filesystem)
 
 	this->app = app;
 	this->winColor = 0x19;
+	
+#ifdef __EMSCRIPTEN__
+	// Load window top bar color setting
+	EM_ASM_({
+		// if (typeof Module._settings_windowTopBar) {
+			// Set window top bar color from settings
+			var color = Module._settings_windowTopBar;
+			var winColorPtr = $0;
+			if (color !== undefined) {
+				HEAPU8[winColorPtr] = color;
+			}
+		// }
+	}, (uintptr_t)&this->winColor);
+#endif
 
 	//init buttons
 	this->buttons = (List*)(filesystem->memoryManager->malloc(sizeof(List))); 

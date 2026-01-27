@@ -39,6 +39,7 @@ SOURCES = src/kernel.cc \
 	  src/app/file_edit.cc \
 	  src/app/file_browse.cc \
 	  src/app/iframe.cc \
+	  src/app/settings.cc \
 	  src/script.cc \
 	  src/math.cc \
 	  src/mode/piano.cc \

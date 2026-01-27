@@ -738,6 +738,14 @@ void journal(char* args, CommandLine* cli) {
 }
 
 #ifdef __EMSCRIPTEN__
+void settings(char* args, CommandLine* cli) {
+	
+	if (cli->gui) { cli->appWindow->parent->CreateChild(5, "Settings", 0); }
+	else { cli->PrintCommand("This command is not available in text mode.\n"); }
+}
+#endif
+
+#ifdef __EMSCRIPTEN__
 void iframe(char* args, CommandLine* cli) {
 	// Extract URL from args
 	char* url = argparse(args, 0);
@@ -1924,7 +1932,10 @@ void CommandLine::hash_cli_init() {
 	this->hash_add("terminal", terminal);
 	this->hash_add("kasugapaint", kasugapaint);
 	this->hash_add("journal", journal);
+#ifdef __EMSCRIPTEN__
+	this->hash_add("settings", settings);
 	this->hash_add("iframe", iframe);
+#endif
 	this->hash_add("window", window);
 	this->hash_add("shortcut", shortcut);
 	this->hash_add("targetgui", targetgui);

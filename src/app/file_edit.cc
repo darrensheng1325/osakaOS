@@ -79,14 +79,14 @@ void Journal::DrawAppMenu(GraphicsContext* gc, CompositeWidget* widget) {
 	int32_t tabY = widget->y + offsety; // Start of content area
 	
 	// Save button (40px wide, 12px tall)
-	gc->FillRectangle(tabX, tabY, 40, 12, 0x07); // Background (x, y, width, height)
-	gc->DrawRectangle(tabX, tabY, 40, 12, 0x3f); // Border (x, y, width, height)
-	gc->PutText("Save", tabX + 2, tabY + 2, 0x3f);
+	// gc->FillRectangle(tabX, tabY, 40, 12, 0x07); // Background (x, y, width, height)
+	// gc->DrawRectangle(tabX, tabY, 40, 12, 0x3f); // Border (x, y, width, height)
+	// gc->PutText("Save", tabX + 2, tabY + 2, 0x3f);
 	
 	// Open button (40px wide, 12px tall)
-	gc->FillRectangle(tabX + 42, tabY, 40, 12, 0x07); // Background (x, y, width, height)
-	gc->DrawRectangle(tabX + 42, tabY, 40, 12, 0x3f); // Border (x, y, width, height)
-	gc->PutText("Open", tabX + 44, tabY + 2, 0x3f);
+	// gc->FillRectangle(tabX + 42, tabY, 40, 12, 0x07); // Background (x, y, width, height)
+	// gc->DrawRectangle(tabX + 42, tabY, 40, 12, 0x3f); // Border (x, y, width, height)
+	// gc->PutText("Open", tabX + 44, tabY + 2, 0x3f);
 }
 
 
