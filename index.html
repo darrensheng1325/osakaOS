@@ -268,13 +268,74 @@
                             }
                             if (!Module._printf_x) Module._printf_x = 0;
                             if (!Module._printf_y) Module._printf_y = 0;
+                            if (!Module._cliCursor) Module._cliCursor = false;
+                            
                             for (var i = 0; i < str.length; i++) {
                                 var ch = str.charCodeAt(i);
-                                if (ch === 10) {
+                                
+                                // Handle special characters
+                                if (ch === 10) { // newline (\n)
                                     Module._printf_y++;
                                     Module._printf_x = 0;
                                     continue;
+                                } else if (ch === 11) { // vertical tab (\v) - clear screen
+                                    // Clear entire screen (80x25)
+                                    if (Module.clearTextCanvas) {
+                                        Module.clearTextCanvas();
+                                    } else {
+                                        // Fallback: clear by drawing spaces
+                                        for (var cy = 0; cy < 25; cy++) {
+                                            for (var cx = 0; cx < 80; cx++) {
+                                                if (Module.putCharTUI) {
+                                                    Module.putCharTUI(cx, cy, 32, 0x07, 0x00); // Space character
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Module._printf_x = 0;
+                                    Module._printf_y = 0;
+                                    continue;
+                                } else if (ch === 9) { // tab (\t) - shell prompt
+                                    if (i === 0) {
+                                        // First character: display "$: " prompt
+                                        Module._cliCursor = true;
+                                        if (Module._printf_x < 3) Module._printf_x = 3;
+                                        
+                                        // Display "$" in red (0x0c)
+                                        if (Module.putCharTUI) {
+                                            Module.putCharTUI(0, Module._printf_y, '$'.charCodeAt(0), 0x0c, 0x00);
+                                        }
+                                        // Display ":" in bright white (0x0f)
+                                        if (Module.putCharTUI) {
+                                            Module.putCharTUI(1, Module._printf_y, ':'.charCodeAt(0), 0x0f, 0x00);
+                                        }
+                                        // Display space
+                                        if (Module.putCharTUI) {
+                                            Module.putCharTUI(2, Module._printf_y, ' '.charCodeAt(0), 0x07, 0x00);
+                                        }
+                                        Module._printf_x = 3;
+                                    } else {
+                                        // Not first character: display cursor
+                                        if (Module.putCharTUI) {
+                                            Module.putCharTUI(Module._printf_x, Module._printf_y, '_'.charCodeAt(0), 0x07, 0x00);
+                                        }
+                                    }
+                                    continue;
+                                } else if (ch === 8) { // backspace (\b)
+                                    if (Module._printf_x > 0) {
+                                        Module._printf_x--;
+                                        if (Module.putCharTUI) {
+                                            Module.putCharTUI(Module._printf_x, Module._printf_y, ' '.charCodeAt(0), 0x07, 0x00);
+                                        }
+                                        // Show cursor at previous position
+                                        if (Module._printf_x > 0 && Module.putCharTUI) {
+                                            Module.putCharTUI(Module._printf_x - 1, Module._printf_y, '_'.charCodeAt(0), 0x07, 0x00);
+                                        }
+                                    }
+                                    continue;
                                 }
+                                
+                                // Normal character
                                 if (Module.putCharTUI) {
                                     Module.putCharTUI(Module._printf_x, Module._printf_y, ch, 0x07, 0x00);
                                 }
@@ -618,15 +679,74 @@
                     // Now render the string character by character
                     if (!Module._printf_x) Module._printf_x = 0;
                     if (!Module._printf_y) Module._printf_y = 0;
+                    if (!Module._cliCursor) Module._cliCursor = false;
                     
                     for (var i = 0; i < str.length; i++) {
                         var ch = str.charCodeAt(i);
-                        if (ch === 10) { // newline
+                        
+                        // Handle special characters
+                        if (ch === 10) { // newline (\n)
                             Module._printf_y++;
                             Module._printf_x = 0;
                             continue;
+                        } else if (ch === 11) { // vertical tab (\v) - clear screen
+                            // Clear entire screen (80x25)
+                            if (Module.clearTextCanvas) {
+                                Module.clearTextCanvas();
+                            } else {
+                                // Fallback: clear by drawing spaces
+                                for (var cy = 0; cy < 25; cy++) {
+                                    for (var cx = 0; cx < 80; cx++) {
+                                        if (Module.putCharTUI) {
+                                            Module.putCharTUI(cx, cy, 32, 0x07, 0x00); // Space character
+                                        }
+                                    }
+                                }
+                            }
+                            Module._printf_x = 0;
+                            Module._printf_y = 0;
+                            continue;
+                        } else if (ch === 9) { // tab (\t) - shell prompt
+                            if (i === 0) {
+                                // First character: display "$: " prompt
+                                Module._cliCursor = true;
+                                if (Module._printf_x < 3) Module._printf_x = 3;
+                                
+                                // Display "$" in red (0x0c)
+                                if (Module.putCharTUI) {
+                                    Module.putCharTUI(0, Module._printf_y, '$'.charCodeAt(0), 0x0c, 0x00);
+                                }
+                                // Display ":" in bright white (0x0f)
+                                if (Module.putCharTUI) {
+                                    Module.putCharTUI(1, Module._printf_y, ':'.charCodeAt(0), 0x0f, 0x00);
+                                }
+                                // Display space
+                                if (Module.putCharTUI) {
+                                    Module.putCharTUI(2, Module._printf_y, ' '.charCodeAt(0), 0x07, 0x00);
+                                }
+                                Module._printf_x = 3;
+                            } else {
+                                // Not first character: display cursor
+                                if (Module.putCharTUI) {
+                                    Module.putCharTUI(Module._printf_x, Module._printf_y, '_'.charCodeAt(0), 0x07, 0x00);
+                                }
+                            }
+                            continue;
+                        } else if (ch === 8) { // backspace (\b)
+                            if (Module._printf_x > 0) {
+                                Module._printf_x--;
+                                if (Module.putCharTUI) {
+                                    Module.putCharTUI(Module._printf_x, Module._printf_y, ' '.charCodeAt(0), 0x07, 0x00);
+                                }
+                                // Show cursor at previous position
+                                if (Module._printf_x > 0 && Module.putCharTUI) {
+                                    Module.putCharTUI(Module._printf_x - 1, Module._printf_y, '_'.charCodeAt(0), 0x07, 0x00);
+                                }
+                            }
+                            continue;
                         }
                         
+                        // Normal character
                         if (Module.putCharTUI) {
                             Module.putCharTUI(Module._printf_x, Module._printf_y, ch, 0x07, 0x00);
                         } else {
@@ -930,15 +1050,75 @@
                 // Now render the string character by character
                 if (!Module._printf_x) Module._printf_x = 0;
                 if (!Module._printf_y) Module._printf_y = 0;
+                if (!Module._cliCursor) Module._cliCursor = false;
                 
                 for (var i = 0; i < str.length; i++) {
                     var ch = str.charCodeAt(i);
-                    if (ch === 10) { // newline
+                    
+                    // Handle special characters
+                    if (ch === 10) { // newline (\n)
                         Module._printf_y++;
                         Module._printf_x = 0;
                         continue;
+                    } else if (ch === 11) { // vertical tab (\v) - clear screen
+                        // Clear entire screen (80x25)
+                        if (Module.clearTextCanvas) {
+                            Module.clearTextCanvas();
+                        } else {
+                            // Fallback: clear by drawing spaces
+                            for (var cy = 0; cy < 25; cy++) {
+                                for (var cx = 0; cx < 80; cx++) {
+                                    if (Module.putCharTUI) {
+                                        Module.putCharTUI(cx, cy, 32, 0x07, 0x00); // Space character
+                                    }
+                                }
+                            }
+                        }
+                        Module._printf_x = 0;
+                        Module._printf_y = 0;
+                        continue;
+                    } else if (ch === 9) { // tab (\t) - shell prompt
+                        if (i === 0) {
+                            // First character: display "$: " prompt
+                            Module._cliCursor = true;
+                            if (Module._printf_x < 3) Module._printf_x = 3;
+                            
+                            // Display "$" in red (0x0c)
+                            if (Module.putCharTUI) {
+                                Module.putCharTUI(0, Module._printf_y, '$'.charCodeAt(0), 0x0c, 0x00);
+                            }
+                            // Display ":" in bright white (0x0f)
+                            if (Module.putCharTUI) {
+                                Module.putCharTUI(1, Module._printf_y, ':'.charCodeAt(0), 0x0f, 0x00);
+                            }
+                            // Display space
+                            if (Module.putCharTUI) {
+                                Module.putCharTUI(2, Module._printf_y, ' '.charCodeAt(0), 0x07, 0x00);
+                            }
+                            Module._printf_x = 3;
+                        } else {
+                            // Not first character: display cursor
+                            if (Module.putCharTUI) {
+                                Module.putCharTUI(Module._printf_x, Module._printf_y, '_'.charCodeAt(0), 0x07, 0x00);
+                            }
+                        }
+                        continue;
+                    } else if (ch === 8) { // backspace (\b)
+                        if (Module._printf_x > 0) {
+                            Module._printf_x--;
+                            if (Module.putCharTUI) {
+                                Module.putCharTUI(Module._printf_x, Module._printf_y, ' '.charCodeAt(0), 0x07, 0x00);
+                            }
+                            // Show cursor at previous position
+                            if (Module._printf_x > 0 && Module.putCharTUI) {
+                                Module.putCharTUI(Module._printf_x - 1, Module._printf_y, '_'.charCodeAt(0), 0x07, 0x00);
+                            }
+                        }
+                        continue;
                     }
                     
+                    
+                    // Normal character
                     if (Module.putCharTUI) {
                         Module.putCharTUI(Module._printf_x, Module._printf_y, ch, 0x07, 0x00);
                     }

@@ -59,6 +59,8 @@ uint32_t FileList(CommandLine* cli);
 uint32_t numOrVar(char* args, CommandLine* cli, uint8_t argNum);		
 
 CommandLine* LoadScriptForTask(bool set, CommandLine* cli = 0);
+bool RequestGUIMode(bool set, bool value = false);
+bool RequestCLIMode(bool set, bool value = false);
 
 
 
@@ -678,6 +680,31 @@ void ping(char* args, CommandLine* cli) {
 }
 
 
+
+//mode switching commands
+void startGUI(char* args, CommandLine* cli) {
+	
+	if (cli->gui) {
+		cli->PrintCommand("Already in GUI mode.\n");
+		return;
+	}
+	
+	cli->PrintCommand("Switching to GUI mode...\n");
+	RequestGUIMode(true, true);
+}
+
+void startCLI(char* args, CommandLine* cli) {
+	
+	if (!cli->gui) {
+		cli->PrintCommand("Already in CLI mode.\n");
+		return;
+	}
+	
+	cli->PrintCommand("Switching to CLI mode...\n");
+	cli->PrintCommand("Note: This will exit GUI mode. Use 'gui' command to return.\n");
+	// Set flag to exit GUI loop
+	RequestCLIMode(true, true);
+}
 
 //graphical commands
 void terminal(char* args, CommandLine* cli) {
@@ -1535,6 +1562,24 @@ void azufetch(char* args, CommandLine* cli) {
 
 	//system info
 	uint32_t memory = ((cmosDetectMemory()*4)/1024/1024)+1;
+	char* cpu = nullptr;
+
+	#ifdef __EMSCRIPTEN__
+		int isWasm = EM_ASM_INT({
+			if (!WebAssembly.isWasm2js) {
+				return 1;
+			} else {
+				return 0;
+			}
+		});
+		if (isWasm) {
+			cpu = "WASM\n";
+		} else {
+			cpu = "Javascript(ASM.js)\n";
+		}
+	#else
+		cpu = "486 (harcoded btw)\n";
+	#endif
 	
 
 	//colors for text/vga
@@ -1545,7 +1590,7 @@ void azufetch(char* args, CommandLine* cli) {
 	cli->PrintCommand("\n  A-Z-U-F-E-T-C-H\n", w);
 	cli->PrintCommand("   ____________   \n", p);
 	cli->PrintCommand("  /------------\\   ", p); cli->PrintCommand("OS:  ", b); cli->PrintCommand("osakaOS\n", w);
-	cli->PrintCommand(" /---________---\\  ", p); cli->PrintCommand("CPU: ", r); cli->PrintCommand("486 (harcoded btw)\n", w);
+	cli->PrintCommand(" /---________---\\  ", p); cli->PrintCommand("CPU: ", r); cli->PrintCommand(cpu, w);
 	cli->PrintCommand("/---/-v-/\\-v-\\---\\ ", p); cli->PrintCommand("MEM: ", b); cli->PrintCommand(int2str(memory), w); cli->PrintCommand("MB of memory\n", w);
 	cli->PrintCommand("|--/-/ v  v \\-\\--| ", p); cli->PrintCommand("VGA: ", r); 
 	if (cli->gui == false) { cli->PrintCommand("80x25 Textmode\n", w);} else { cli->PrintCommand("320x200 Mode 13h\n", w); }
@@ -1815,6 +1860,10 @@ void CommandLine::hash_cli_init() {
 	this->hash_add("ip", ip);
 	this->hash_add("ping", ping);
 	this->hash_add("reboot", rebootCMD);
+	
+	//mode switching
+	this->hash_add("gui", startGUI);
+	this->hash_add("cli", startCLI);
 	
 	//hw ports and asm
 	this->hash_add("wport8",  PortWrite8);

@@ -422,18 +422,12 @@ void Desktop::Screenshot() {
 
 
 void Desktop::OnMouseDown(common::uint8_t button) {
-#ifdef __EMSCRIPTEN__
-	printf("[C] Desktop::OnMouseDown called\n");
-#endif
 
 	if (this->osaka->sim) { this->osaka->OnMouseDown(MouseX, MouseY, button);
 	} else {
 		// Set mouse start click flag (replaces 0x5b key)
 		if (button == 1) { // Left mouse button
 			this->mouseStartClick = true;
-#ifdef __EMSCRIPTEN__
-			printf("[C] mouseStartClick set to true!\n");
-#endif
 		}
 		
 		//left click after switching to sim and back

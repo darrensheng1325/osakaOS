@@ -230,7 +230,6 @@ void MouseDriver::Activate() {
 extern "C" {
     EMSCRIPTEN_KEEPALIVE void handleMouseDown(uint8_t button, int x, int y) {
         // Use printf for logging (single argument version)
-        printf("[C] handleMouseDown called\n");
         if (g_mouseHandler) {
             // Cast to Desktop to access MouseX and MouseY
             // Desktop inherits from MouseEventHandler, so this is safe
@@ -255,9 +254,6 @@ extern "C" {
                 g_mouseHandler->OnMouseMove(dx, dy);
             }
             g_mouseHandler->OnMouseDown(button);
-            printf("[C] OnMouseDown called on handler\n");
-        } else {
-            printf("[C] ERROR: g_mouseHandler is null!\n");
         }
     }
     

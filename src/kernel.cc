@@ -600,6 +600,9 @@ class CLIKeyboardEventHandler : public KeyboardEventHandler, public CommandLine 
 
 						input[0] = 0x00;
 						index = 0;
+						
+						// Display $ prompt after command
+						printf("\t");
 						break;
 					//type
 					default:
@@ -957,6 +960,20 @@ Desktop* LoadDesktopForTask(bool set, Desktop* desktop = 0) {
 	return retDesktop;
 }
 
+// Global flag to request GUI mode switch from CLI
+bool RequestGUIMode(bool set, bool value = false) {
+	static bool requestGUI = false;
+	if (set) { requestGUI = value; }
+	return requestGUI;
+}
+
+// Global flag to request CLI mode switch from GUI
+bool RequestCLIMode(bool set, bool value = false) {
+	static bool requestCLI = false;
+	if (set) { requestCLI = value; }
+	return requestCLI;
+}
+
 void DrawDesktopTask() {
 
 	Desktop* desktop = LoadDesktopForTask(false);
@@ -1070,7 +1087,8 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	new (kbhandler) CLIKeyboardEventHandler(gdt, &taskManager, &memoryManager, &osakaFileSystem, &compiler, &vga, &cmos, &drvManager);
 	kbhandler->hash_cli_init(); //init command line
 	
-	KeyboardDriver keyboard(&interrupts, kbhandler);
+	KeyboardDriver* keyboard = (KeyboardDriver*)memoryManager.malloc(sizeof(KeyboardDriver));
+	new (keyboard) KeyboardDriver(&interrupts, kbhandler);
 	kbhandler->caps = false;
 	kbhandler->shift = false;
 	kbhandler->ctrl = false;
@@ -1084,7 +1102,7 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	MouseDriver mouse(&interrupts, &desktop);
 
 
-	drvManager.AddDriver(&keyboard);
+	drvManager.AddDriver(keyboard);
 	drvManager.AddDriver(&mouse);
 	drvManager.AddDriver(&ata0m);
 
@@ -1204,19 +1222,17 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	//kbhandler->OnKeyDown('\b');
 	//printf("\v");
 
-	printf("[KERNEL] Entering CLI loop (waiting for mouse click)\n");
-	// Note: custom printf only takes one argument, so we can't format the keyValue here
+	printf("[KERNEL] Entering CLI mode\n");
+	printf("Type 'gui' to switch to GUI mode\n");
+	printf("\t"); // Display $ prompt
 
 	//this is the command line :D		
-	// Wait for mouse click instead of 0x5b key
-#ifdef __EMSCRIPTEN__
-	printf("[KERNEL] Waiting for mouse click\n");
-#endif
-	while (!desktop.mouseStartClick) {
+	// Stay in CLI mode until 'gui' command is executed
+	while (!RequestGUIMode(false)) {
 #ifdef __EMSCRIPTEN__
 		// Check flag periodically and yield
-		if (desktop.mouseStartClick) {
-			printf("[KERNEL] Mouse click detected! Exiting CLI loop\n");
+		if (RequestGUIMode(false)) {
+			printf("[KERNEL] GUI mode requested! Exiting CLI loop\n");
 			break;
 		}
 		emscripten_sleep(0); // Yield to allow mouse events to process
@@ -1242,62 +1258,179 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 		emscripten_sleep(1);
 #endif
 	}
-	// Reset the mouse start click flag
-	desktop.mouseStartClick = false;
+	// Reset the GUI request flag
+	RequestGUIMode(true, false);
 	kbhandler->cli = true;
 	kbhandler->gui = true;
 
-
-	//initialize desktop
-	KeyboardDriver keyboardDesktop(&interrupts, &desktop);
-	drvManager.Replace(&keyboardDesktop, 0);
-
-	desktop.CreateChild(1, "Osaka's Terminal", kbhandler);
-	printf("[KERNEL] Desktop created\n");
+	// Main mode switching loop - can switch between CLI and GUI
+	bool guiInitialized = false;
+	KeyboardDriver* keyboardDesktop = nullptr;
 	
-	
-	//add task for drawing desktop
-	LoadDesktopForTask(true, &desktop);
-	Task guiTask(gdt, DrawDesktopTask, "osakaOS GUI", 0);
-	taskManager.AddTask(&guiTask);
-	printf("[KERNEL] GUI task added\n");
-
-	// Draw something to test the canvas
-	printf("[KERNEL] Testing canvas rendering...\n");
-	vga.FillRectangle(0, 0, 320, 200, 0x01); // Fill with blue
-	vga.DrawToScreen();
-	printf("[KERNEL] Test draw completed\n");
-	
-	// Force switch to graphics mode
-#ifdef __EMSCRIPTEN__
-	EM_ASM_({
-		if (Module.switchToGraphicsMode) {
-			Module.switchToGraphicsMode();
-			console.log('[JS] Forced switch to graphics mode');
-		}
-	});
-#endif
-	
-	//this is the gui :)
-	printf("[KERNEL] Entering GUI loop\n");
 	while (1) {
-	
-		//this is the loop where the kernel
-		//exists in, the rest is handed off
-		//to the taskmanager, godspeed o7
-		//			      /|
-		//			      / \
-	
+		// Initialize GUI on first entry (only once)
+		if (!guiInitialized) {
+			//initialize desktop
+			keyboardDesktop = (KeyboardDriver*)memoryManager.malloc(sizeof(KeyboardDriver));
+			new (keyboardDesktop) KeyboardDriver(&interrupts, &desktop);
+			drvManager.Replace(keyboardDesktop, 0);
+
+			desktop.CreateChild(1, "Osaka's Terminal", kbhandler);
+			printf("[KERNEL] Desktop created\n");
+			
+			
+			//add task for drawing desktop
+			LoadDesktopForTask(true, &desktop);
+			Task guiTask(gdt, DrawDesktopTask, "osakaOS GUI", 0);
+			taskManager.AddTask(&guiTask);
+			printf("[KERNEL] GUI task added\n");
+
+			// Draw something to test the canvas
+			printf("[KERNEL] Testing canvas rendering...\n");
+			vga.FillRectangle(0, 0, 320, 200, 0x01); // Fill with blue
+			vga.DrawToScreen();
+			printf("[KERNEL] Test draw completed\n");
+			
+			// Force switch to graphics mode
 #ifdef __EMSCRIPTEN__
-		// For Emscripten, directly call desktop draw since task manager
-		// relies on timer interrupts which don't work the same way
-		// The desktop draw will yield via emscripten_sleep internally
-		desktop.Draw(desktop.gc);
-		// Yield to browser event loop to prevent blocking
-		emscripten_sleep(0);
-#else
-		// Original x86 version relies on task manager
-		// which is scheduled via timer interrupts
+			EM_ASM_({
+				if (Module.switchToGraphicsMode) {
+					Module.switchToGraphicsMode();
+					console.log('[JS] Forced switch to graphics mode');
+				}
+			});
 #endif
+			guiInitialized = true;
+		}
+		
+		//this is the gui :)
+		printf("[KERNEL] Entering GUI loop\n");
+		
+		// GUI mode loop
+		while (!RequestCLIMode(false)) {
+			//this is the loop where the kernel
+			//exists in, the rest is handed off
+			//to the taskmanager, godspeed o7
+			//			      /|
+			//			      / \
+		
+#ifdef __EMSCRIPTEN__
+			// For Emscripten, directly call desktop draw since task manager
+			// relies on timer interrupts which don't work the same way
+			// The desktop draw will yield via emscripten_sleep internally
+			desktop.Draw(desktop.gc);
+			// Yield to browser event loop to prevent blocking
+			emscripten_sleep(0);
+#else
+			// Original x86 version relies on task manager
+			// which is scheduled via timer interrupts
+#endif
+		}
+		
+		// Switching back to CLI mode
+		printf("[KERNEL] Switching back to CLI mode\n");
+		RequestCLIMode(true, false);
+		kbhandler->gui = false;
+		kbhandler->cli = true;
+		
+		// Restore CLI keyboard handler
+		drvManager.Replace(keyboard, 0);
+		
+		// Display $ prompt when switching back to CLI
+		printf("\t");
+		
+		// Switch to text mode and unlock pointer
+#ifdef __EMSCRIPTEN__
+		EM_ASM_({
+			console.log('[KERNEL] Switching to CLI mode - unlocking pointer and showing text canvas');
+			// Exit pointer lock if active
+			if (document.pointerLockElement) {
+				console.log('[KERNEL] Exiting pointer lock');
+				document.exitPointerLock();
+			}
+			// Switch to text mode (show text canvas, hide graphics canvas)
+			var textCanvas = document.getElementById('osaka-text-canvas');
+			var graphicsCanvas = document.getElementById('osaka-canvas');
+			console.log('[KERNEL] Text canvas:', textCanvas, 'Graphics canvas:', graphicsCanvas);
+			if (textCanvas && graphicsCanvas) {
+				textCanvas.style.display = 'block';
+				graphicsCanvas.style.display = 'none';
+				textCanvas.focus();
+				console.log('[KERNEL] Switched to text mode - text canvas shown, graphics hidden');
+			} else {
+				console.error('[KERNEL] Canvas elements not found!');
+			}
+			// Also try calling Module function if it exists
+			if (typeof Module !== 'undefined' && Module.switchToTextMode) {
+				Module.switchToTextMode();
+			}
+		});
+#endif
+		
+		// CLI mode loop
+		while (!RequestGUIMode(false)) {
+#ifdef __EMSCRIPTEN__
+			if (RequestGUIMode(false)) {
+				break;
+			}
+			emscripten_sleep(0);
+#endif	
+
+			kbhandler->cli = true;
+
+			while (kbhandler->cliMode) {
+				kbhandler->cli = false;
+				kbhandler->modeSelect(kbhandler->cliMode, kbhandler->pressed, 
+						kbhandler->keyChar, kbhandler->ctrl, 0, 
+						&osakaFileSystem);
+				
+#ifdef __EMSCRIPTEN__
+				emscripten_sleep(0);
+#endif
+			}
+			
+#ifdef __EMSCRIPTEN__
+			emscripten_sleep(1);
+#endif
+		}
+		
+		// Switching back to GUI mode
+		printf("[KERNEL] Switching back to GUI mode\n");
+		RequestGUIMode(true, false);
+		kbhandler->gui = true;
+		kbhandler->cli = true;
+		
+		// Re-initialize desktop keyboard handler (reuse existing desktop)
+		// Reuse the existing keyboard driver if it exists, otherwise create a new one
+		if (keyboardDesktop == nullptr) {
+			keyboardDesktop = (KeyboardDriver*)memoryManager.malloc(sizeof(KeyboardDriver));
+			new (keyboardDesktop) KeyboardDriver(&interrupts, &desktop);
+		}
+		drvManager.Replace(keyboardDesktop, 0);
+		
+		// Switch to graphics mode
+#ifdef __EMSCRIPTEN__
+		EM_ASM_({
+			console.log('[KERNEL] Switching to GUI mode - showing graphics canvas');
+			var textCanvas = document.getElementById('osaka-text-canvas');
+			var graphicsCanvas = document.getElementById('osaka-canvas');
+			console.log('[KERNEL] Text canvas:', textCanvas, 'Graphics canvas:', graphicsCanvas);
+			if (textCanvas && graphicsCanvas) {
+				textCanvas.style.display = 'none';
+				graphicsCanvas.style.display = 'block';
+				graphicsCanvas.focus();
+				console.log('[KERNEL] Switched to graphics mode - graphics canvas shown, text hidden');
+			} else {
+				console.error('[KERNEL] Canvas elements not found!');
+			}
+			// Also try calling Module function if it exists
+			if (typeof Module !== 'undefined' && Module.switchToGraphicsMode) {
+				Module.switchToGraphicsMode();
+			}
+		});
+#endif
+		
+		// Recreate terminal window when switching back to GUI
+		desktop.CreateChild(1, "Osaka's Terminal", kbhandler);
 	}
 }
