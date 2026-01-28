@@ -625,8 +625,12 @@ void CompositeWidget::Print(char* str) {
 	uint8_t adjustedTextHeight = TEXT_MAX_HEIGHT - (1 * this->Fullscreen == false);
 	
 
-	//print string
-	for (uint8_t ch = 0; str[ch] != '\0'; ch++) {	
+	//print string with bounds checking to prevent memory access out of bounds
+	if (str == nullptr) { return; }
+	
+	// Add reasonable maximum length to prevent infinite loops or out-of-bounds access
+	const uint16_t MAX_STRING_LENGTH = 4096; // Reasonable limit for display strings
+	for (uint16_t ch = 0; ch < MAX_STRING_LENGTH && str[ch] != '\0'; ch++) {	
 
 		switch (str[ch]) {
 		
@@ -645,7 +649,12 @@ void CompositeWidget::Print(char* str) {
 				outy++;
 				break;
 			default:
-				charArr = charset[str[ch]-32];
+				// Bounds check to prevent invalid charset access
+				if (str[ch] >= 32 && str[ch] <= 127) {
+					charArr = charset[str[ch]-32];
+				} else {
+					charArr = charset[0]; // Use default character for invalid values
+				}
 				
 				//scrolling
 				if (outy >= adjustedTextHeight) {

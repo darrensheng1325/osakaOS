@@ -601,7 +601,14 @@ DesktopButton::DesktopButton(char* file, uint8_t openType, char* imageFile, uint
 //: Widget(0, 0, 20, 20) {
 
 	this->openType = openType;
-	for (int i = 0; file[i] != '\0'; i++) { this->file[i] = file[i]; }
+	// Copy string with bounds checking and ensure null termination
+	int i = 0;
+	if (file != nullptr) {
+		for (i = 0; i < 32 && file[i] != '\0'; i++) { 
+			this->file[i] = file[i]; 
+		}
+	}
+	this->file[i] = '\0'; // Ensure null termination
 
 	//20x20 sprite res
 	for (int i = 0; i < 400; i++) { this->buffer[i] = 0x00; }
