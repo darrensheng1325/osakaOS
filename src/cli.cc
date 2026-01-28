@@ -1648,7 +1648,8 @@ void help(char* args, CommandLine* cli) {
 	cli->PrintCommand("    'files', 'delete (file)', 'ex (file)',\n");
 	cli->PrintCommand("    'int (string) (int)', '+ (string) (int)',\n");
 	cli->PrintCommand("    'rdisk (int) (int)', 'wdisk (int) (string)'\n");
-	cli->PrintCommand("    'rmem (int)', 'wmem (int) (int)'\n\n");
+	cli->PrintCommand("    'rmem (int)', 'wmem (int) (int)', 'iframe (url)'\n");
+	cli->PrintCommand("    'favicon (url)', 'title (string)'\n\n");
 	
 	cli->PrintCommand("Or use these keyboard shortcuts: \n\n");
 	
