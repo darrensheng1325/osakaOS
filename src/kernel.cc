@@ -946,11 +946,20 @@ TaskManager* LoadTaskManager(bool set, TaskManager* tm = 0) {
 	return manager;
 }
 
+CommandLine* LoadMainCLI(bool set, CommandLine* cli = 0);
+
 CommandLine* LoadScriptForTask(bool set, CommandLine* cli = 0) {
 
 	static CommandLine* script = 0;
 	if (set) { script = cli; }
 	return script;
+}
+
+// Global function to store/retrieve main CLI instance for JavaScript access
+CommandLine* LoadMainCLI(bool set, CommandLine* cli) {
+	static CommandLine* mainCLI = 0;
+	if (set) { mainCLI = cli; }
+	return mainCLI;
 }
 
 Desktop* LoadDesktopForTask(bool set, Desktop* desktop = 0) {
@@ -1092,6 +1101,7 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	CLIKeyboardEventHandler* kbhandler = (CLIKeyboardEventHandler*)memoryManager.malloc(sizeof(CLIKeyboardEventHandler));
 	new (kbhandler) CLIKeyboardEventHandler(gdt, &taskManager, &memoryManager, &osakaFileSystem, &compiler, &vga, &cmos, &drvManager);
 	kbhandler->hash_cli_init(); //init command line
+	LoadMainCLI(true, kbhandler); // Store for JavaScript access
 	
 	KeyboardDriver* keyboard = (KeyboardDriver*)memoryManager.malloc(sizeof(KeyboardDriver));
 	new (keyboard) KeyboardDriver(&interrupts, kbhandler);

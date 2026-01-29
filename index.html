@@ -243,6 +243,23 @@
                     console.log('[JS] Re-attached forwardMouseToIframe');
                 }
                 
+                // Expose CLI command execution function for JavaScript
+                // The C++ function executeCLICommand is automatically exposed by EMSCRIPTEN_KEEPALIVE
+                // We add a convenient wrapper that handles string conversion
+                Module.runCLICommand = function(cmd) {
+                    if (typeof cmd !== 'string') {
+                        console.error('[JS] runCLICommand: command must be a string');
+                        return;
+                    }
+                    if (typeof Module.executeCLICommand === 'function') {
+                        // Emscripten will handle the string conversion automatically
+                        Module.executeCLICommand(cmd);
+                    } else {
+                        console.error('[JS] runCLICommand: executeCLICommand not available (CLI not initialized yet)');
+                    }
+                };
+                console.log('[JS] runCLICommand function exposed on Module');
+                
                 // Ensure safeReadAndPrintString and renderPixels are still available
                 // (Emscripten might have replaced the Module object)
                 if (!Module.safeReadAndPrintString) {

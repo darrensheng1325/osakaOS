@@ -59,6 +59,7 @@ uint32_t FileList(CommandLine* cli);
 uint32_t numOrVar(char* args, CommandLine* cli, uint8_t argNum);		
 
 CommandLine* LoadScriptForTask(bool set, CommandLine* cli = 0);
+CommandLine* LoadMainCLI(bool set, CommandLine* cli = 0);
 bool RequestGUIMode(bool set, bool value = false);
 bool RequestCLIMode(bool set, bool value = false);
 
@@ -1885,6 +1886,28 @@ void dad(char* args, CommandLine* cli) {
 	}
 }
 
+// Execute JavaScript code from CLI
+void js(char* args, CommandLine* cli) {
+#ifdef __EMSCRIPTEN__
+	if (!args || args[0] == '\0') {
+		cli->PrintCommand("Usage: js <javascript_code>\n");
+		return;
+	}
+	
+	// Execute JavaScript code
+	EM_ASM_({
+		try {
+			var code = UTF8ToString($0);
+			eval(code);
+		} catch (e) {
+			console.error('[CLI->JS] Error executing JavaScript:', e);
+		}
+	}, args);
+#else
+	cli->PrintCommand("JavaScript execution is only available in web version.\n");
+#endif
+}
+
 CommandLine::CommandLine(GlobalDescriptorTable* gdt, 
 			TaskManager* tm, 
 			MemoryManager* mm,
@@ -2116,6 +2139,14 @@ void CommandLine::hash_cli_init() {
 	this->hash_add("offset", offsetptr);
 	
 	this->hash_add("sata", sata);
+	
+#ifdef __EMSCRIPTEN__
+	this->hash_add("js", js);
+#endif
+	
+#ifdef __EMSCRIPTEN__
+	this->hash_add("js", js);
+#endif
 }
 
 
@@ -2347,3 +2378,38 @@ char* CommandLine::command(char* cmd, uint8_t length) {
 	}
 	return cmd;
 }
+
+#ifdef __EMSCRIPTEN__
+// Function to execute CLI commands from JavaScript
+extern "C" {
+	EMSCRIPTEN_KEEPALIVE void executeCLICommand(const char* cmd) {
+		CommandLine* cli = LoadMainCLI(false);
+		if (cli == nullptr) {
+			EM_ASM_({
+				console.error('[JS->CLI] CLI not initialized yet');
+			});
+			return;
+		}
+		
+		if (cmd == nullptr || cmd[0] == '\0') {
+			return;
+		}
+		
+		// Calculate command length (max 255 for safety)
+		uint8_t length = 0;
+		while (cmd[length] != '\0' && length < 255) {
+			length++;
+		}
+		
+		// Use local buffer to avoid memory management issues
+		char cmdBuffer[256];
+		for (uint8_t i = 0; i < length; i++) {
+			cmdBuffer[i] = cmd[i];
+		}
+		cmdBuffer[length] = '\0';
+		
+		// Execute the command
+		cli->command(cmdBuffer, length);
+	}
+}
+#endif
