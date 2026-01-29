@@ -812,12 +812,39 @@ bool FileSystem::WriteLBA(char* name, uint8_t* file, uint32_t lba) {
 	uint32_t size = OFS_BLOCK_SIZE * (lba + 1);
 	uint32_t location = this->GetFileSector(name);
 
-	if (FileIf(location) == false) {
+#ifdef __EMSCRIPTEN__
+	EM_ASM_({
+		console.log('[WriteLBA] Called for file, lba=' + $0 + ', location=' + $1);
+	}, lba, location);
+#else
+	printf("WriteLBA called\n");
+#endif
+
+	bool fileExists = FileIf(location);
+#ifdef __EMSCRIPTEN__
+	EM_ASM_({
+		console.log('[WriteLBA] FileIf(' + $0 + ') returned: ' + ($1 ? 'true' : 'false'));
+	}, location, fileExists ? 1 : 0);
+#endif
+
+	if (fileExists == false) {
 	
 		printf("write what?\n");
 		return false;
 	}
+	
+#ifdef __EMSCRIPTEN__
+	EM_ASM_({
+		console.log('[WriteLBA] FileIf check passed, continuing...');
+	}, 0);
+#endif
+	
 	uint32_t startSector = location + 1 + ((size - OFS_BLOCK_SIZE) / 512);
+#ifdef __EMSCRIPTEN__
+	EM_ASM_({
+		console.log('[WriteLBA] Calculated startSector=' + $0 + ' (location=' + $1 + ', size=' + $2 + ')');
+	}, startSector, location, size);
+#endif
 	uint8_t sectorData[512];
 	
 
@@ -826,6 +853,11 @@ bool FileSystem::WriteLBA(char* name, uint8_t* file, uint32_t lba) {
 	int fragmentCheck = 0;
 	while (FileIf(startSector) == true && size > GetFileSize(name)) {
 	
+#ifdef __EMSCRIPTEN__
+		EM_ASM_({
+			console.log('[WriteLBA] Fragmentation detected, skipping from sector ' + $0);
+		}, startSector);
+#endif
 		startSector += OFS_BLOCK_SIZE;
 		fragmentCheck++;
 		addFragment = true;
@@ -833,6 +865,11 @@ bool FileSystem::WriteLBA(char* name, uint8_t* file, uint32_t lba) {
 		//check for max of 64 blocks for availability
 		if (fragmentCheck >= 64) { break; }
 	}
+#ifdef __EMSCRIPTEN__
+	EM_ASM_({
+		console.log('[WriteLBA] Final startSector=' + $0 + ', will write ' + $1 + ' sectors');
+	}, startSector, OFS_BLOCK_SIZE/512);
+#endif
 
 	//add a new fragment to file
 	if (addFragment) {
@@ -858,6 +895,11 @@ bool FileSystem::WriteLBA(char* name, uint8_t* file, uint32_t lba) {
 
 
 	//write block sector by sector
+#ifdef __EMSCRIPTEN__
+	EM_ASM_({
+		console.log('[WriteLBA] About to start writing sectors, startSector=' + $0 + ', will write ' + $1 + ' sectors');
+	}, startSector, OFS_BLOCK_SIZE/512);
+#endif
 	for (int i = 0; i < OFS_BLOCK_SIZE/512; i++) {
 
 		//fill in sector data with file data
@@ -867,6 +909,11 @@ bool FileSystem::WriteLBA(char* name, uint8_t* file, uint32_t lba) {
 		}
 
 		//write sector to file
+#ifdef __EMSCRIPTEN__
+		EM_ASM_({
+			console.log('[WriteLBA] Writing sector ' + $0 + ' (i=' + $1 + '), first byte=0x' + $2.toString(16));
+		}, startSector+i, i, sectorData[0]);
+#endif
 		ata0m->Write28(startSector+i, sectorData, 512, 0);
 	}
 

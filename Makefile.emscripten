@@ -9,8 +9,9 @@ EMCCFLAGS = -Iinclude -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 \
 	-s USE_WEBGL2=0 \
 	-s NO_EXIT_RUNTIME=1 \
 	-s ASYNCIFY=1 \
+	-s ASYNCIFY_STACK_SIZE=65536 \
 	-s SINGLE_FILE=0 \
-	-g4 \
+	-g3 \
 	--no-entry
 
 # Source files (excluding assembly and hardware-specific files that need stubs)

@@ -343,6 +343,9 @@ void rdisk(char* args, CommandLine* cli) {
 	//read data
 	uint8_t data[512];
 	cli->filesystem->ata0m->Read28(sector, data, size, 0);
+	#ifdef __EMSCRIPTEN__
+	data[0] = 1;
+	#endif
 
 	//print and empty data
 	cli->PrintCommand((char*)data);
@@ -447,16 +450,43 @@ void files(char* args, CommandLine* cli) {
 
 void catFile(char* args, CommandLine* cli) {
 
-	uint32_t LBAsize = cli->filesystem->GetFileSize(args)/OFS_BLOCK_SIZE;
+	EM_ASM_({
+		console.log('[CATFILE] Called with args:', UTF8ToString($0));
+	}, args);
+	
+	uint32_t fileSize = cli->filesystem->GetFileSize(args);
+	EM_ASM_({
+		console.log('[CATFILE] GetFileSize returned:', $0);
+	}, fileSize);
+	
+	uint32_t LBAsize = fileSize / OFS_BLOCK_SIZE;
+	EM_ASM_({
+		console.log('[CATFILE] LBAsize calculated:', $0, '(fileSize:', $1, ', OFS_BLOCK_SIZE:', $2, ')');
+	}, LBAsize, fileSize, OFS_BLOCK_SIZE);
+	
 	uint8_t data[OFS_BLOCK_SIZE];
 
 	if (LBAsize == 0) {
-	
+		EM_ASM_({
+			console.log('[CATFILE] LBAsize is 0, printing "Nothing here..."');
+		});
 		cli->PrintCommand("Nothing here...");
 	} else {
+		EM_ASM_({
+			console.log('[CATFILE] LBAsize: ', $0, ', starting to read file');
+		}, LBAsize);
 		for (int i = 0; i < LBAsize; i++) {
-	
-			cli->filesystem->ReadLBA(args, data, i);
+			EM_ASM_({
+				console.log('[CATFILE] Reading LBA:', $0);
+			}, i);
+			
+			bool readSuccess = cli->filesystem->ReadLBA(args, data, i);
+			EM_ASM_({
+				console.log('[CATFILE] ReadLBA returned:', $0);
+				if ($0) {
+					console.log('[CATFILE] First 10 bytes of data:', HEAPU8[$1], HEAPU8[$1+1], HEAPU8[$1+2], HEAPU8[$1+3], HEAPU8[$1+4], HEAPU8[$1+5], HEAPU8[$1+6], HEAPU8[$1+7], HEAPU8[$1+8], HEAPU8[$1+9]);
+				}
+			}, readSuccess, (uintptr_t)data);
 	
 			//print data from file
 			for (uint16_t j = 0; j < OFS_BLOCK_SIZE; j++) {
@@ -466,8 +496,14 @@ void catFile(char* args, CommandLine* cli) {
 				cli->PrintCommand(str);
 			}
 		}
+		EM_ASM_({
+			console.log('[CATFILE] Finished reading all LBAs');
+		});
 	}
 	cli->PrintCommand("\n");
+	EM_ASM_({
+		console.log('[CATFILE] Function completed');
+	});
 }
 
 
@@ -2278,7 +2314,10 @@ char* CommandLine::command(char* cmd, uint8_t length) {
 
 
 	//actual command found
-	if (this->cmdTable[result] != nullptr)  {	
+	if (this->cmdTable[result] != nullptr)  {
+		EM_ASM_({
+			console.log('[CLI] Executing command:', UTF8ToString($0), ', args:', UTF8ToString($1));
+		}, command, arguments);	
 	
 		(*CommandLine::cmdTable[result])(arguments, this); //execute function from array
 		arguments[0] = '\0';
