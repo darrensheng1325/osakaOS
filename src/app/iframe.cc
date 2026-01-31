@@ -104,10 +104,19 @@ void IframeApp::ComputeAppState(GraphicsContext* gc, CompositeWidget* widget) {
 		if (Module.captureIframeToBuffer) {
 			// Update widget coordinates in the app object (for cross-origin iframe positioning)
 			if (Module.iframeApps && Module.iframeApps[$0]) {
-				Module.iframeApps[$0].widgetX = $1;
-				Module.iframeApps[$0].widgetY = $2;
-				Module.iframeApps[$0].widgetW = $3;
-				Module.iframeApps[$0].widgetH = $4;
+				var app = Module.iframeApps[$0];
+				var oldW = app.widgetW;
+				var oldH = app.widgetH;
+				app.widgetX = $1;
+				app.widgetY = $2;
+				app.widgetW = $3;
+				app.widgetH = $4;
+				// Check if dimensions changed and trigger resize
+				if (oldW !== app.widgetW || oldH !== app.widgetH) {
+					if (Module.resizeIframeApp) {
+						Module.resizeIframeApp($0);
+					}
+				}
 			}
 			// Write to the content area of the window (skip header)
 			Module.captureIframeToBuffer($0, 1, 10, $3 - 1, $4 - 10, $5);

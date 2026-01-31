@@ -1573,12 +1573,57 @@
         // Attach to Module initially
         Module.setupIframeApp = window.setupIframeAppFunction;
         
+        // Function to resize iframe and canvas when window dimensions change
+        function resizeIframeApp(iframeId) {
+            var app = Module.iframeApps ? Module.iframeApps[iframeId] : null;
+            if (!app || !app.iframe) return;
+            
+            // Calculate new content dimensions
+            var newContentW = Math.max(1, app.widgetW - 1);
+            var newContentH = Math.max(1, app.widgetH - 10);
+            
+            // Update stored content dimensions
+            app.contentW = newContentW;
+            app.contentH = newContentH;
+            
+            if (app.isCrossOrigin) {
+                // For cross-origin iframes, updatePosition will handle the resize
+                if (app.updatePosition) {
+                    app.updatePosition();
+                }
+            } else {
+                // For same-origin iframes, resize the capture canvas
+                if (app.captureCanvas) {
+                    app.captureCanvas.width = newContentW;
+                    app.captureCanvas.height = newContentH;
+                }
+                // Also resize the iframe itself for same-origin (needed for proper capture)
+                if (app.iframe) {
+                    app.iframe.style.width = newContentW + 'px';
+                    app.iframe.style.height = newContentH + 'px';
+                }
+            }
+        }
+        
+        // Store resize function globally for access from C++
+        window.resizeIframeAppFunction = resizeIframeApp;
+        if (typeof Module !== 'undefined') {
+            Module.resizeIframeApp = resizeIframeApp;
+        }
+        
         // Store in window for re-attachment
         window.captureIframeToBufferFunction = function(iframeId, offsetX, offsetY, contentW, contentH, bufferPtr) {
             var app = Module.iframeApps ? Module.iframeApps[iframeId] : null;
             if (!app) {
                 console.error('[IframeApp JS] captureIframeToBuffer: app not found', iframeId);
                 return;
+            }
+            
+            // Check if widget dimensions have changed and resize if needed
+            var newContentW = Math.max(1, app.widgetW - 1);
+            var newContentH = Math.max(1, app.widgetH - 10);
+            if (app.contentW !== newContentW || app.contentH !== newContentH) {
+                resizeIframeApp(iframeId);
             }
             
             // If cross-origin, update iframe position and skip capture (iframe is displayed directly)
