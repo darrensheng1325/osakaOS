@@ -1908,6 +1908,333 @@ void js(char* args, CommandLine* cli) {
 #endif
 }
 
+// Download file from URL
+void download(char* args, CommandLine* cli) {
+#ifdef __EMSCRIPTEN__
+	if (!args || args[0] == '\0') {
+		cli->PrintCommand("Usage: download <url> [filename]\n");
+		cli->PrintCommand("Example: download https://example.com/file.txt myfile.txt\n");
+		return;
+	}
+	
+	char* url = argparse(args, 0);
+	char* filenameArg = argparse(args, 1);
+	
+	if (strlen(url) < 1) {
+		cli->PrintCommand("Error: URL is required.\n");
+		return;
+	}
+	
+	// Always use a local buffer for filename to ensure it's valid
+	char filename[33];
+	for (int i = 0; i < 33; i++) {
+		filename[i] = '\0';
+	}
+	
+	// If no filename provided, extract from URL
+	if (filenameArg == nullptr || strlen(filenameArg) < 1) {
+		// Extract filename from URL
+		int urlLen = strlen(url);
+		int lastSlash = -1;
+		int lastDot = -1;
+		
+		for (int i = urlLen - 1; i >= 0; i--) {
+			if (url[i] == '/' && lastSlash == -1) {
+				lastSlash = i;
+			}
+			if (url[i] == '.' && lastDot == -1) {
+				lastDot = i;
+			}
+		}
+		
+		if (lastSlash >= 0 && lastSlash < urlLen - 1) {
+			int start = lastSlash + 1;
+			int end = urlLen;
+			// Remove query parameters if present
+			for (int i = start; i < urlLen; i++) {
+				if (url[i] == '?' || url[i] == '#') {
+					end = i;
+					break;
+				}
+			}
+			
+			int nameLen = end - start;
+			if (nameLen > 0 && nameLen < 33) {
+				for (int i = 0; i < nameLen; i++) {
+					filename[i] = url[start + i];
+				}
+				filename[nameLen] = '\0';
+			} else {
+				// Default name if extraction fails
+				for (int i = 0; i < 8; i++) {
+					filename[i] = "download"[i];
+				}
+				filename[8] = '\0';
+			}
+		} else {
+			// Default name if no slash found
+			for (int i = 0; i < 8; i++) {
+				filename[i] = "download"[i];
+			}
+			filename[8] = '\0';
+		}
+	} else {
+		// Copy provided filename, ensuring it's null-terminated and within limits
+		int nameLen = strlen(filenameArg);
+		if (nameLen > 32) nameLen = 32; // Max 32 chars for filename
+		for (int i = 0; i < nameLen; i++) {
+			filename[i] = filenameArg[i];
+		}
+		filename[nameLen] = '\0';
+	}
+	
+	// Debug: Print the filename being used
+	EM_ASM_({
+		console.log('[DOWNLOAD] Using filename:', UTF8ToString($0));
+	}, filename);
+	
+	// Check if file already exists
+	uint32_t fileSector = cli->filesystem->GetFileSector(filename);
+	if (cli->filesystem->FileIf(fileSector)) {
+		cli->PrintCommand("Error: File '");
+		cli->PrintCommand(filename);
+		cli->PrintCommand("' already exists. Delete it first or use a different name.\n");
+		return;
+	}
+	
+	cli->PrintCommand("Downloading from: ");
+	cli->PrintCommand(url);
+	cli->PrintCommand("\n");
+	
+	// Allocate buffer for downloaded data (max 1MB for now)
+	const uint32_t maxSize = 1024 * 1024;
+	uint8_t* downloadBuffer = (uint8_t*)(cli->mm->malloc(maxSize));
+	if (!downloadBuffer) {
+		cli->PrintCommand("Error: Failed to allocate memory for download.\n");
+		return;
+	}
+	
+	// Download file using JavaScript fetch API
+	uint32_t downloadedSize = 0;
+	int downloadSuccess = EM_ASM_INT({
+		var urlPtr = $0;
+		var bufferPtr = $1;
+		var maxSize = $2;
+		var sizePtr = $3;
+		
+		// Read URL from WASM memory
+		var url = '';
+		var i = 0;
+		while (HEAPU8[urlPtr + i] !== 0 && i < 256) {
+			url += String.fromCharCode(HEAPU8[urlPtr + i]);
+			i++;
+		}
+		
+		// Try direct download first, then fallback to CORS proxy if needed
+		var useProxy = false;
+		var binaryString = '';
+		var responseSize = 0;
+		
+		// First attempt: direct download
+		try {
+			var xhr = new XMLHttpRequest();
+			xhr.open('GET', url, false);
+			xhr.overrideMimeType('text/plain; charset=x-user-defined');
+			xhr.send(null);
+			
+			// Check if request succeeded
+			if (xhr.status === 200 || xhr.status === 0) {
+				binaryString = xhr.responseText || '';
+				responseSize = binaryString.length;
+				console.log('[DOWNLOAD] Direct download succeeded');
+			} else {
+				// HTTP error, try proxy
+				useProxy = true;
+			}
+		} catch (e) {
+			// CORS or network error - try proxy
+			console.log('[DOWNLOAD] Direct download failed, trying CORS proxy...');
+			useProxy = true;
+		}
+		
+		// Fallback to CORS proxy
+		if (useProxy) {
+			try {
+				// Try CORS proxy services one by one
+				var proxySuccess = false;
+				
+				// Try proxy 1: allorigins.win
+				if (!proxySuccess) {
+					try {
+						var proxyUrl1 = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+						var proxyXhr1 = new XMLHttpRequest();
+						proxyXhr1.open('GET', proxyUrl1, false);
+						proxyXhr1.overrideMimeType('text/plain; charset=x-user-defined');
+						proxyXhr1.send(null);
+						
+						if (proxyXhr1.status === 200 || proxyXhr1.status === 0) {
+							binaryString = proxyXhr1.responseText || '';
+							responseSize = binaryString.length;
+							console.log('[DOWNLOAD] CORS proxy 1 succeeded');
+							proxySuccess = true;
+						}
+					} catch (e1) {
+						// Try next proxy
+					}
+				}
+				
+				// Try proxy 2: corsproxy.io
+				if (!proxySuccess) {
+					try {
+						var proxyUrl2 = 'https://corsproxy.io/?' + encodeURIComponent(url);
+						var proxyXhr2 = new XMLHttpRequest();
+						proxyXhr2.open('GET', proxyUrl2, false);
+						proxyXhr2.overrideMimeType('text/plain; charset=x-user-defined');
+						proxyXhr2.send(null);
+						
+						if (proxyXhr2.status === 200 || proxyXhr2.status === 0) {
+							binaryString = proxyXhr2.responseText || '';
+							responseSize = binaryString.length;
+							console.log('[DOWNLOAD] CORS proxy 2 succeeded');
+							proxySuccess = true;
+						}
+					} catch (e2) {
+						// Try next proxy
+					}
+				}
+				
+				// Try proxy 3: codetabs.com
+				if (!proxySuccess) {
+					try {
+						var proxyUrl3 = 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url);
+						var proxyXhr3 = new XMLHttpRequest();
+						proxyXhr3.open('GET', proxyUrl3, false);
+						proxyXhr3.overrideMimeType('text/plain; charset=x-user-defined');
+						proxyXhr3.send(null);
+						
+						if (proxyXhr3.status === 200 || proxyXhr3.status === 0) {
+							binaryString = proxyXhr3.responseText || '';
+							responseSize = binaryString.length;
+							console.log('[DOWNLOAD] CORS proxy 3 succeeded');
+							proxySuccess = true;
+						}
+					} catch (e3) {
+						// All proxies failed
+					}
+				}
+				
+				if (!proxySuccess) {
+					console.error('[DOWNLOAD] All CORS proxies failed');
+					return 0;
+				}
+			} catch (proxyError) {
+				console.error('[DOWNLOAD] CORS proxy error');
+				return 0;
+			}
+		}
+		
+		// Write the downloaded data to WASM memory
+		if (responseSize > 0) {
+			var size = Math.min(responseSize, maxSize);
+			
+			for (var j = 0; j < size; j++) {
+				HEAPU8[bufferPtr + j] = binaryString.charCodeAt(j) & 0xff;
+			}
+			
+			HEAPU32[sizePtr >> 2] = size;
+			console.log('[DOWNLOAD] Downloaded', size, 'bytes');
+			return 1;
+		} else {
+			console.error('[DOWNLOAD] No data received');
+			return 0;
+		}
+	}, (uintptr_t)url, (uintptr_t)downloadBuffer, maxSize, (uintptr_t)&downloadedSize);
+	
+	if (!downloadSuccess) {
+		cli->PrintCommand("Error: Failed to download file.\n");
+		cli->PrintCommand("This may be due to CORS (Cross-Origin Resource Sharing) restrictions.\n");
+		cli->PrintCommand("The download command automatically tries a CORS proxy if the direct request fails.\n");
+		cli->PrintCommand("If it still fails, try:\n");
+		cli->PrintCommand("  1. Use a URL that supports CORS\n");
+		cli->PrintCommand("  2. Use a file hosting service that allows CORS\n");
+		cli->PrintCommand("  3. Download from the same origin as this page\n");
+		cli->mm->free(downloadBuffer);
+		return;
+	}
+	
+	if (downloadedSize == 0) {
+		cli->PrintCommand("Error: Downloaded file is empty.\n");
+		cli->mm->free(downloadBuffer);
+		return;
+	}
+	
+	// Write file to filesystem
+	// For files larger than OFS_BLOCK_SIZE, we need to write in chunks
+	uint32_t blockSize = OFS_BLOCK_SIZE;
+	uint32_t numBlocks = (downloadedSize + blockSize - 1) / blockSize; // Ceiling division
+	
+	// Prepare first block data (NewFile expects exactly OFS_BLOCK_SIZE bytes)
+	uint8_t firstBlock[OFS_BLOCK_SIZE];
+	for (uint32_t i = 0; i < OFS_BLOCK_SIZE; i++) {
+		if (i < downloadedSize) {
+			firstBlock[i] = downloadBuffer[i];
+		} else {
+			firstBlock[i] = 0; // Pad with zeros
+		}
+	}
+	
+	// Create file with first block and total size
+	bool created = cli->filesystem->NewFile(filename, firstBlock, downloadedSize);
+	
+	if (!created) {
+		cli->PrintCommand("Error: Failed to create file.\n");
+		cli->mm->free(downloadBuffer);
+		return;
+	}
+	
+	// Write additional blocks if file is larger than one block
+	for (uint32_t lba = 1; lba < numBlocks; lba++) {
+		uint8_t blockData[OFS_BLOCK_SIZE];
+		uint32_t offset = lba * blockSize;
+		
+		// Copy data for this block, pad with zeros if needed
+		for (uint32_t i = 0; i < blockSize; i++) {
+			if (offset + i < downloadedSize) {
+				blockData[i] = downloadBuffer[offset + i];
+			} else {
+				blockData[i] = 0; // Pad with zeros
+			}
+		}
+		
+		bool written = cli->filesystem->WriteLBA(filename, blockData, lba);
+		
+		if (!written) {
+			cli->PrintCommand("Warning: Failed to write block ");
+			cli->PrintCommand(int2str(lba));
+			cli->PrintCommand(".\n");
+			break;
+		}
+	}
+	
+	// Update file size if needed (should already be set by NewFile, but just in case)
+	uint32_t currentSize = cli->filesystem->GetFileSize(filename);
+	if (currentSize != downloadedSize) {
+		uint32_t location = cli->filesystem->GetFileSector(filename);
+		cli->filesystem->UpdateSize(location, downloadedSize);
+	}
+	
+	cli->mm->free(downloadBuffer);
+	
+	cli->PrintCommand("Downloaded '");
+	cli->PrintCommand(filename);
+	cli->PrintCommand("' (");
+	cli->PrintCommand(int2str(downloadedSize));
+	cli->PrintCommand(" bytes).\n");
+#else
+	cli->PrintCommand("Download command is only available in web version.\n");
+#endif
+}
+
 CommandLine::CommandLine(GlobalDescriptorTable* gdt, 
 			TaskManager* tm, 
 			MemoryManager* mm,
@@ -2071,6 +2398,9 @@ void CommandLine::hash_cli_init() {
 	this->hash_add("delete", deleteFile);
 	this->hash_add("encrypt", encrypt);
 	this->hash_add("decrypt", decrypt);
+#ifdef __EMSCRIPTEN__
+	this->hash_add("download", download);
+#endif
 
 	//vga/graphical
 	this->hash_add("terminal", terminal);
