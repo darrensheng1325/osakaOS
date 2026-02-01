@@ -114,6 +114,10 @@
             JavaScript is required to run osakaOS. Please enable JavaScript in your browser.
         </div>
     </noscript>
+
+    <div id="error" class="hidden" width="320" height="200" style="width: 100vw; height: 100vh; background: rgb(90, 162, 239); color: #fff; text-align: center;">
+        <span style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 30px;">The webpage crashed. Please reload the page.</span>
+    </div>
     
     <script>
         // Test that JavaScript is running
@@ -195,6 +199,12 @@
                 status.textContent = 'Error: ' + (e.message || 'Unknown error');
                 status.classList.remove('hidden');
                 status.style.color = '#f00';
+            }
+            if (e.message.includes('FUNCTION_TABLE')) {
+                document.getElementById('error').classList.remove('hidden');
+                document.getElementById('osaka-canvas').style.display = 'none';
+                document.getElementById('osaka-text-canvas').style.display = 'none';
+                // window.location.reload();
             }
         });
         
