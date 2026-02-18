@@ -256,17 +256,75 @@
                 
                 // Expose CLI command execution function for JavaScript
                 // The C++ function executeCLICommand is automatically exposed by EMSCRIPTEN_KEEPALIVE
-                // We add a convenient wrapper that handles string conversion
+                // Emscripten may expose it as _executeCLICommand or executeCLICommand
                 Module.runCLICommand = function(cmd) {
                     if (typeof cmd !== 'string') {
                         console.error('[JS] runCLICommand: command must be a string');
                         return;
                     }
+                    
+                    if (!cmd || cmd.length === 0) {
+                        console.error('[JS] runCLICommand: command is empty');
+                        return;
+                    }
+                    
+                    // Try different possible function names
+                    var executeFunc = null;
                     if (typeof Module.executeCLICommand === 'function') {
-                        // Emscripten will handle the string conversion automatically
-                        Module.executeCLICommand(cmd);
+                        executeFunc = Module.executeCLICommand;
+                    } else if (typeof Module._executeCLICommand === 'function') {
+                        executeFunc = Module._executeCLICommand;
+                    } else if (typeof executeCLICommand === 'function') {
+                        executeFunc = executeCLICommand;
+                    }
+                    
+                    // Try using ccall first (most reliable for string conversion)
+                    if (typeof Module.ccall === 'function') {
+                        try {
+                            console.log('[JS] runCLICommand: Executing command via ccall:', cmd);
+                            Module.ccall('executeCLICommand', null, ['string'], [cmd]);
+                            return;
+                        } catch (e) {
+                            console.error('[JS] runCLICommand: ccall failed:', e);
+                        }
+                    }
+                    
+                    if (executeFunc) {
+                        try {
+                            console.log('[JS] runCLICommand: Executing command:', cmd);
+                            // Try to allocate string in WASM memory if stringToNewUTF8 is available
+                            if (typeof Module.stringToNewUTF8 === 'function') {
+                                var stringPtr = Module.stringToNewUTF8(cmd);
+                                if (stringPtr) {
+                                    try {
+                                        executeFunc(stringPtr);
+                                        return;
+                                    } finally {
+                                        if (typeof Module._free === 'function') {
+                                            Module._free(stringPtr);
+                                        }
+                                    }
+                                }
+                            }
+                            // Fallback: try direct call (Emscripten might handle it)
+                            executeFunc(cmd);
+                        } catch (e) {
+                            console.error('[JS] runCLICommand: Error executing command:', e);
+                            console.error('[JS] Error stack:', e.stack);
+                        }
                     } else {
-                        console.error('[JS] runCLICommand: executeCLICommand not available (CLI not initialized yet)');
+                        console.error('[JS] runCLICommand: executeCLICommand not available');
+                        console.error('[JS] Module.executeCLICommand:', typeof Module.executeCLICommand);
+                        console.error('[JS] Module._executeCLICommand:', typeof Module._executeCLICommand);
+                        // List all functions that might be related
+                        var relatedFunctions = Object.keys(Module).filter(function(k) {
+                            return k.toLowerCase().includes('cli') || 
+                                   k.toLowerCase().includes('command') || 
+                                   k.toLowerCase().includes('execute');
+                        });
+                        if (relatedFunctions.length > 0) {
+                            console.log('[JS] Related functions found:', relatedFunctions);
+                        }
                     }
                 };
                 console.log('[JS] runCLICommand function exposed on Module');

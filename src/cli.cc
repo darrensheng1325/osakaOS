@@ -87,8 +87,20 @@ uint16_t hash(char* str) {
 
 void say(char* args, CommandLine* cli) {
 
+#ifdef __EMSCRIPTEN__
+	EM_ASM_({
+		console.log('[CLI] say command called with args:', UTF8ToString($0));
+	}, args);
+#endif
+
 	cli->PrintCommand(args);
 	cli->PrintCommand("\n");
+	
+#ifdef __EMSCRIPTEN__
+	EM_ASM_({
+		console.log('[CLI] say command completed');
+	});
+#endif
 }
 
 void print(char* args, CommandLine* cli) {
@@ -732,13 +744,30 @@ void ping(char* args, CommandLine* cli) {
 //mode switching commands
 void startGUI(char* args, CommandLine* cli) {
 	
+#ifdef __EMSCRIPTEN__
+	EM_ASM_({
+		console.log('[CLI] startGUI called, cli->gui =', $0);
+	}, cli->gui ? 1 : 0);
+#endif
+	
 	if (cli->gui) {
 		cli->PrintCommand("Already in GUI mode.\n");
+#ifdef __EMSCRIPTEN__
+		EM_ASM_({
+			console.log('[CLI] Already in GUI mode');
+		});
+#endif
 		return;
 	}
 	
 	cli->PrintCommand("Switching to GUI mode...\n");
 	RequestGUIMode(true, true);
+	
+#ifdef __EMSCRIPTEN__
+	EM_ASM_({
+		console.log('[CLI] RequestGUIMode called, flag set to true');
+	});
+#endif
 }
 
 void startCLI(char* args, CommandLine* cli) {
@@ -2491,8 +2520,29 @@ void CommandLine::PrintCommand(char* str, uint16_t color) {
 	}
 	
 	if (gui) { 
-		if (this->targetWindow) { this->userWindow->Print(str);
-		} else {		  this->appWindow->Print(str); }
+		// Ensure appWindow is initialized before printing
+		if (this->appWindow == nullptr) {
+#ifdef __EMSCRIPTEN__
+			EM_ASM_({
+				console.warn('[CLI] PrintCommand: appWindow is null, outputting to console:', UTF8ToString($0));
+			}, str);
+			// Fall back to printf for debugging
+			printf(str);
+#else
+			printf(str);
+#endif
+			return;
+		}
+		
+		if (this->targetWindow) { 
+			if (this->userWindow != nullptr) {
+				this->userWindow->Print(str);
+			} else {
+				this->appWindow->Print(str);
+			}
+		} else { 
+			this->appWindow->Print(str); 
+		}
 	} else { 
 		printf(str); 
 	}
@@ -2722,6 +2772,9 @@ extern "C" {
 		}
 		
 		if (cmd == nullptr || cmd[0] == '\0') {
+			EM_ASM_({
+				console.error('[JS->CLI] Command is null or empty');
+			});
 			return;
 		}
 		
@@ -2738,8 +2791,16 @@ extern "C" {
 		}
 		cmdBuffer[length] = '\0';
 		
+		EM_ASM_({
+			console.log('[JS->CLI] Executing command:', UTF8ToString($0), 'length:', $1);
+		}, cmdBuffer, length);
+		
 		// Execute the command
 		cli->command(cmdBuffer, length);
+		
+		EM_ASM_({
+			console.log('[JS->CLI] Command execution completed');
+		});
 	}
 }
 #endif
