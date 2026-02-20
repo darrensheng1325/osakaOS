@@ -1,0 +1,2 @@
+js eval(`setInterval(()=>{for(var\x20i=0;i<300;i++){Module.runCLICommand("putpixel\x20"+Math.floor(Math.random()*300)+"\x20"+Math.floor(Math.random()*200)+"\x20"+Math.floor(Math.random()*64));
+}}, 100);`);
