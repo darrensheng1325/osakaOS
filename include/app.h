@@ -13,6 +13,8 @@
 #define APP_TYPE_KASUGAPAINT 2
 #define APP_TYPE_JOURNAL 3
 #define APP_TYPE_SHINOSAKA 4
+// Web build only — wraps a JS <iframe> inside a kernel window.
+#define APP_TYPE_IFRAME 5
 
 
 namespace os {

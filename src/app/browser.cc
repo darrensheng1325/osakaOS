@@ -8,9 +8,16 @@ using namespace os::filesystem;
 using namespace os::net;
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void dnsResolveAsync(const char* host, common::uint16_t dnsId);
+extern "C" common::uint32_t dnsLastResolvedIP();
+extern "C" common::uint16_t dnsLastResolvedId();
+#endif
+
+
 void sleep(uint32_t);
-uint8_t* memset(uint8_t*, int, size_t);
-uint8_t valCount(uint8_t*, uint8_t, size_t);
+uint8_t* memset(uint8_t*, int, os::common::size_t);
+uint8_t valCount(uint8_t*, uint8_t, os::common::size_t);
 uint16_t prng();
 
 
@@ -171,13 +178,27 @@ void Shinosaka::ComputeAppState(GraphicsContext* gc, CompositeWidget* widget) {
 		}
 	
 		
+#ifdef __EMSCRIPTEN__
+		// Poll the JS DNS bridge for a resolved address before
+		// touching the (stubbed) UDP socket. The bridge sets
+		// dnsLastResolvedIP() once Module.dnsResolveOverHttp is done.
+		if (this->dns_id != 0) {
+			uint32_t resolved = dnsLastResolvedIP();
+			if (resolved != 0 && dnsLastResolvedId() == this->dns_id) {
+				this->domainIP = resolved;
+				this->dns_id = 0;
+				this->sendFlagHTTP = true;
+			}
+		}
+#endif
+
 		if (this->udpSocket != nullptr) {
-				
-			/*	
+
+			/*
 			widget->textColor = W000000;
-			
+
 			for (int i = 0; i < udpSocket->bufferIndex; i++) {
-				
+
 				widget->PutChar((char)(udpSocket->handleBuffer[i]));
 			}
 			widget->PutChar('\n');
@@ -439,9 +460,24 @@ void Shinosaka::SendRequestDNS(CompositeWidget* widget) {
 	widget->PutChar('\n'); 
 	widget->textColor = WFFFFFF;
 
-	this->udpSocket = this->net->udp->Connect(str2ip("8.8.8.8"), DNS_PORT);
+	// DNS_SERVER_IP_STR is defined by the build system (see
+	// Makefile.emscripten / Makefile). It defaults to 8.8.8.8 for
+	// bare-metal and 127.0.0.1 for the WASM build, which talks to
+	// the DoH endpoint in dns/.
+#ifndef DNS_SERVER_IP_STR
+#define DNS_SERVER_IP_STR "8.8.8.8"
+#endif
+	this->udpSocket = this->net->udp->Connect(str2ip((char*)DNS_SERVER_IP_STR), DNS_PORT);
 	this->net->udp->Bind(this->udpSocket, this->net);
 	this->udpSocket->Send((uint8_t*)messageDNS, messageLengthDNS);
+
+#ifdef __EMSCRIPTEN__
+	// Browsers can't actually emit UDP/53 — kick off a JS-side
+	// resolution against the configured DNS server. The response
+	// flows back through dnsResolveCallback() in kernel_web_dns.cc
+	// and is consumed by the main loop poll below.
+	dnsResolveAsync(this->domainName, this->dns_id);
+#endif
 
 	
 
@@ -508,7 +544,36 @@ uint16_t Shinosaka::HandleResponseDNS(uint8_t* data, uint16_t dataSize, Composit
 
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void httpFetchAsync(os::net::TransmissionControlProtocolSocket* socket,
+				const char* url);
+#endif
+
 void Shinosaka::SendRequestHTTP(CompositeWidget* widget) {
+
+#ifdef __EMSCRIPTEN__
+	// Bypass Connect2Server entirely on the web build. Upstream's
+	// Connect2Server contains an unconditional null-deref
+	// (`tcpSocket->poll = false` right after `tcpSocket = nullptr`)
+	// that happens to be harmless on bare metal where unmapped page
+	// 0 silently absorbs the write, but traps under wasm. We
+	// allocate a minimal socket ourselves and hand it to the JS
+	// fetch bridge. The fetch result populates handleBuffer so the
+	// existing HANDLE_FLAG_TCP path in ComputeAppState picks it up
+	// the same way it would on bare metal.
+	if (this->tcpSocket == nullptr) {
+		this->tcpSocket = (net::TransmissionControlProtocolSocket*)
+			this->memoryManager->malloc(sizeof(net::TransmissionControlProtocolSocket));
+		// Zero just the bookkeeping fields the bridge touches —
+		// no need to construct the full vtable since we never
+		// dispatch through it on the web path.
+		this->tcpSocket->bufferIndex = 0;
+		this->tcpSocket->handleType = HANDLE_FLAG_EMPTY;
+		this->tcpSocket->connectionFail = false;
+	}
+	httpFetchAsync(this->tcpSocket, this->domainName);
+	return;
+#endif
 
 	if (this->Connect2Server(this->domainIP)) {
 
@@ -518,9 +583,9 @@ void Shinosaka::SendRequestHTTP(CompositeWidget* widget) {
 		uint16_t pathSize = 0;
 
 		for (int i = 0; i < strlen(this->domainName); i++) {
-		
+
 			if (this->domainName[i] == '/') {
-				
+
 				pathIndex = i + 1;
 				pathSize = strlen(this->domainName)-pathIndex;
 				this->domainName[i] = '\0';
@@ -532,8 +597,8 @@ void Shinosaka::SendRequestHTTP(CompositeWidget* widget) {
 		//construct request
 		//char* baseRequest = "GET /";
 		//char* fileRequest = " HTTP/1.1\r\nHost: ";
-		
-		
+
+
 		char* baseRequest = "GET / HTTP/1.1\r\nHost: ";
 		char* endRequest = "\r\nUser-Agent: osakaOS\r\nAccept: */*\r\nConnection: close\r\n\r\n";
 		

@@ -5,9 +5,11 @@ using namespace os;
 using namespace os::common;
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
-
-
+#endif
 Node::Node(void* value) {
 
 	this->value = value;

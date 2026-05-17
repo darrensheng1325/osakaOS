@@ -4,7 +4,11 @@ using namespace os;
 using namespace os::common;
 using namespace os::net;
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
+#endif
 void sleep(uint32_t);
 
 UserDatagramProtocolSocket::UserDatagramProtocolSocket(UserDatagramProtocolProvider* backend) {

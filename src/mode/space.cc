@@ -7,9 +7,14 @@ using namespace os::drivers;
 
 void TUI(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, bool);
 void printfTUI(char*, uint8_t, uint8_t, uint8_t, uint8_t);
+#ifdef __EMSCRIPTEN__
+extern "C" void putcharTUI(unsigned char, unsigned char, 
+		unsigned char, uint8_t, uint8_t);
+#else
 void putcharTUI(unsigned char, unsigned char, 
 		unsigned char, uint8_t, uint8_t);
 
+#endif
 void sleep(uint32_t);
 uint16_t prng();
 void makeBeep(uint32_t);

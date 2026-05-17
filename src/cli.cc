@@ -1,5 +1,8 @@
 #include <cli.h>
 #include <script.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 
 using namespace os;
@@ -21,9 +24,17 @@ bool CommandLine::WakeupInit = false;
 uint16_t hash(char* str);
 	
 void TUI(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, bool);
+#ifdef __EMSCRIPTEN__
+extern "C" void putcharTUI(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
+#else
 void putcharTUI(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
+#endif
 uint16_t setTextColor(bool set, uint16_t color = WAAAAAA);
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
+#endif
 void printOsaka(uint8_t, bool);
 
 void makeBeep(uint32_t freq);
@@ -194,9 +205,15 @@ void heap(char* args, CommandLine* cli) {
 
 
 //asm
+#ifndef __EMSCRIPTEN__
 void startInterrupts(char* args, CommandLine* cli) { asm volatile("sti"); }
 void stopInterrupts(char* args, CommandLine* cli) { asm volatile("cli"); }
 void halt(char* args, CommandLine* cli) { asm volatile("hlt"); }
+#else
+void startInterrupts(char* args, CommandLine* cli) {}
+void stopInterrupts(char* args, CommandLine* cli) {}
+void halt(char* args, CommandLine* cli) {}
+#endif
 
 
 //assembler for generating executable 
@@ -864,18 +881,187 @@ void shinosaka(char* args, CommandLine* cli) {
 
 
 void window(char* args, CommandLine* cli) {
-		
+
 	if (cli->gui && cli->userWindow == nullptr) {
-	
+
 		if (strlen(args) < 2) { cli->userWindow = cli->appWindow->parent->CreateChild(0, "OSaka Window", cli); }
 		else { cli->userWindow = cli->appWindow->parent->CreateChild(APP_TYPE_SCRIPT, args, cli); }
 
 		cli->targetWindow = true;
 	} else {
-		if (cli->gui) { cli->PrintCommand("Window is already active.\n"); } 
+		if (cli->gui) { cli->PrintCommand("Window is already active.\n"); }
 		else { cli->PrintCommand("This command is not available in text mode.\n"); }
 	}
 }
+
+
+// ---- Web-only CLI commands (iframe / favicon / title / js / fetch) ----
+// These were lost in the upstream merge. They wire CLI invocations
+// directly to JS so the user can poke at the host page (and pull
+// files via fetch into the kernel's filesystem) without going
+// through the kernel's TCP stack.
+#ifdef __EMSCRIPTEN__
+void iframe(char* args, CommandLine* cli) {
+	char* url = argparse(args, 0);
+	if (strlen(url) < 1) {
+		cli->PrintCommand("Usage: iframe <url>\n");
+		cli->PrintCommand("Example: iframe https://example.com\n");
+		return;
+	}
+	// IframeApp reads its URL from the window title (`name`).
+	// In GUI mode we can attach the new window to the existing
+	// appWindow's parent (the desktop). In CLI text mode we still
+	// have a desktop registered (LoadDesktopForTask), but here we
+	// don't have a stable handle to it from CommandLine, so we
+	// fall back to telling the user to enter GUI first.
+	if (cli->gui && cli->appWindow != nullptr) {
+		cli->appWindow->parent->CreateChild(APP_TYPE_IFRAME, url, 0);
+		cli->PrintCommand("Opening iframe window: ");
+		cli->PrintCommand(url);
+		cli->PrintCommand("\n");
+	} else {
+		cli->PrintCommand("Switch to GUI mode (press ` ) first, then run iframe.\n");
+	}
+}
+
+void favicon(char* args, CommandLine* cli) {
+	char* url = argparse(args, 0);
+	if (strlen(url) < 1) {
+		cli->PrintCommand("Usage: favicon <url>\n");
+		return;
+	}
+	// We iterate <link> elements manually rather than using a CSS
+	// attribute selector — the *= and single-quote tokens in a
+	// selector like link[rel*='icon'] are mis-tokenised by the C
+	// preprocessor inside an EM_ASM body.
+	EM_ASM_({
+		var u = UTF8ToString($0);
+		var links = document.head.getElementsByTagName("link");
+		for (var i = links.length - 1; i >= 0; i--) {
+			var rel = links[i].getAttribute("rel") || "";
+			if (rel.toLowerCase().indexOf("icon") >= 0) {
+				links[i].parentNode.removeChild(links[i]);
+			}
+		}
+		var link = document.createElement("link");
+		link.rel = "icon";
+		link.href = u;
+		document.head.appendChild(link);
+	}, url);
+	cli->PrintCommand("Favicon changed to: ");
+	cli->PrintCommand(url);
+	cli->PrintCommand("\n");
+}
+
+void titleCmd(char* args, CommandLine* cli) {
+	if (!args || args[0] == '\0') {
+		cli->PrintCommand("Usage: title <text>\n");
+		return;
+	}
+	EM_ASM_({ document.title = UTF8ToString($0); }, args);
+	cli->PrintCommand("Page title changed to: ");
+	cli->PrintCommand(args);
+	cli->PrintCommand("\n");
+}
+
+void js(char* args, CommandLine* cli) {
+	if (!args || args[0] == '\0') {
+		cli->PrintCommand("Usage: js <javascript_code>\n");
+		return;
+	}
+	EM_ASM_({
+		try { eval(UTF8ToString($0)); }
+		catch (e) { console.error("[CLI->JS]", e); }
+	}, args);
+}
+
+// Download a URL into the kernel filesystem via fetch().
+void download(char* args, CommandLine* cli) {
+	char* url = argparse(args, 0);
+	char* nameArg = argparse(args, 1);
+	if (strlen(url) < 1) {
+		cli->PrintCommand("Usage: download <url> [filename]\n");
+		return;
+	}
+	// Choose a filename: explicit arg, else basename of URL, else "download".
+	char filename[33];
+	for (int i = 0; i < 33; i++) filename[i] = '\0';
+	if (nameArg != nullptr && strlen(nameArg) >= 1) {
+		uint32_t n = strlen(nameArg);
+		if (n > 32) n = 32;
+		for (uint32_t i = 0; i < n; i++) filename[i] = nameArg[i];
+	} else {
+		int urlLen = strlen(url);
+		int lastSlash = -1;
+		for (int i = urlLen - 1; i >= 0; i--) if (url[i] == '/') { lastSlash = i; break; }
+		int start = (lastSlash >= 0 && lastSlash < urlLen - 1) ? lastSlash + 1 : urlLen;
+		int end = urlLen;
+		for (int i = start; i < urlLen; i++) if (url[i] == '?' || url[i] == '#') { end = i; break; }
+		int nameLen = end - start;
+		if (nameLen <= 0 || nameLen > 32) {
+			const char* def = "download";
+			for (int i = 0; i < 8; i++) filename[i] = def[i];
+		} else {
+			for (int i = 0; i < nameLen; i++) filename[i] = url[start + i];
+		}
+	}
+	if (cli->filesystem->FileIf(cli->filesystem->GetFileSector(filename))) {
+		cli->PrintCommand("File already exists: ");
+		cli->PrintCommand(filename);
+		cli->PrintCommand("\n");
+		return;
+	}
+	cli->PrintCommand("Downloading ");
+	cli->PrintCommand(url);
+	cli->PrintCommand(" -> ");
+	cli->PrintCommand(filename);
+	cli->PrintCommand("\n");
+
+	// Synchronous XHR keeps the kernel's CLI flow simple — the
+	// command returns once the bytes are in the kernel FS.
+	const uint32_t MAX = 1024 * 1024;
+	uint8_t* buf = (uint8_t*)cli->mm->malloc(MAX);
+	if (!buf) { cli->PrintCommand("malloc failed\n"); return; }
+	// Note: EM_ASM_INT's body is a function-like macro arg, so
+	// top-level commas inside the body would split the body across
+	// macro params. Use separate `var` statements instead of
+	// comma-chained declarators to keep all body content in a
+	// single preprocessor arg.
+	uint32_t got = EM_ASM_INT({
+		try {
+			var url = UTF8ToString($0);
+			var bufp = $1;
+			var maxLen = $2;
+			var xhr = new XMLHttpRequest();
+			xhr.open("GET", url, false);
+			xhr.overrideMimeType("text/plain; charset=x-user-defined");
+			xhr.send();
+			if (xhr.status >= 200 && xhr.status < 300) {
+				var s = xhr.responseText;
+				var n = Math.min(s.length, maxLen);
+				for (var i = 0; i < n; i++) HEAPU8[bufp + i] = s.charCodeAt(i) & 0xff;
+				return n;
+			}
+		} catch (e) { console.error("[download]", e); }
+		return 0;
+	}, url, buf, MAX);
+	if (got > 0) {
+		cli->filesystem->NewFile(filename, buf, got);
+		cli->PrintCommand("Saved ");
+		cli->PrintCommand(int2str(got));
+		cli->PrintCommand(" bytes.\n");
+	} else {
+		cli->PrintCommand("Download failed (CORS or HTTP error).\n");
+	}
+	cli->mm->free(buf);
+}
+#else
+void iframe(char* args, CommandLine* cli)  { cli->PrintCommand("Web-only command.\n"); }
+void favicon(char* args, CommandLine* cli) { cli->PrintCommand("Web-only command.\n"); }
+void titleCmd(char* args, CommandLine* cli){ cli->PrintCommand("Web-only command.\n"); }
+void js(char* args, CommandLine* cli)      { cli->PrintCommand("Web-only command.\n"); }
+void download(char* args, CommandLine* cli){ cli->PrintCommand("Web-only command.\n"); }
+#endif
 
 
 void charsetPrint(char* args, CommandLine* cli) {
@@ -1617,7 +1803,16 @@ void CommandLine::hash_cli_init() {
 	this->hash_add("tcp", tcp);
 	this->hash_add("web", web);
 	this->hash_add("control", control);
+#ifdef __EMSCRIPTEN__
+	// Web build: download via JS fetch() into the kernel filesystem.
+	this->hash_add("download", download);
+#else
 	this->hash_add("download", download2file);
+#endif
+	this->hash_add("iframe", iframe);
+	this->hash_add("favicon", favicon);
+	this->hash_add("title", titleCmd);
+	this->hash_add("js", js);
 
 	//vga/graphical
 	this->hash_add("terminal", terminal);

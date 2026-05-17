@@ -32,6 +32,11 @@ void RawDataHandler::Send(uint8_t* buffer, uint32_t size) {
     }
 }
 
+// local memset to avoid pulling the project's <string.h> (which has different signatures)
+static void* aweb_memset(void* dst, int v, unsigned n) {
+    unsigned char* p = (unsigned char*)dst; while (n--) *p++ = (unsigned char)v; return dst;
+}
+
 amd_am79c973::amd_am79c973(PeripheralComponentInterconnectDeviceDescriptor* dev, InterruptManager* interrupts)
 : Driver(),
   InterruptHandler(dev->interrupt + interrupts->HardwareInterruptOffset(), interrupts),
@@ -40,15 +45,16 @@ amd_am79c973::amd_am79c973(PeripheralComponentInterconnectDeviceDescriptor* dev,
   MACAddress4Port(dev->portBase + 0x04),
   registerDataPort(dev->portBase + 0x10),
   registerAddressPort(dev->portBase + 0x12),
-  resetPort(dev->portBase + 0x14),
+  resetPort16(dev->portBase + 0x14),
+  resetPort32(dev->portBase + 0x14),
   busControlRegisterDataPort(dev->portBase + 0x16) {
-    
+
     this->handler = 0;
     this->currentSendBuffer = 0;
     this->currentRecvBuffer = 0;
-    memset(&initBlock, 0, sizeof(initBlock));
-    memset(sendBufferDescrMemory, 0, sizeof(sendBufferDescrMemory));
-    memset(recvBufferDescrMemory, 0, sizeof(recvBufferDescrMemory));
+    aweb_memset(&initBlock, 0, sizeof(initBlock));
+    aweb_memset(sendBufferDescrMemory, 0, sizeof(sendBufferDescrMemory));
+    aweb_memset(recvBufferDescrMemory, 0, sizeof(recvBufferDescrMemory));
     sendBufferDescr = 0;
     recvBufferDescr = 0;
 }

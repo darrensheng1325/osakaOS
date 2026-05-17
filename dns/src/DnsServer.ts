@@ -112,6 +112,48 @@ export class DnsServer {
     this.server.send(responseBuffer, rinfo.port, rinfo.address);
   }
 
+  // Resolve a hostname for the HTTP/DoH path: first check overrides,
+  // then fall back to the upstream DNS over UDP. Returns DoH-style
+  // answer records ({name,type,TTL,data}).
+  private async resolveOverHttp(name: string, type: string): Promise<any[]> {
+    if (!name) return [];
+    if (this.overridesEnabled) {
+      const override = this.findDomainOverride(name);
+      if (override) {
+        return override.records
+          .filter(r => r.type.toUpperCase() === type)
+          .map(r => ({ name, type: 1, TTL: r.ttl || 300, data: r.data }));
+      }
+    }
+    return new Promise((resolve, reject) => {
+      const client = dgram.createSocket('udp4');
+      const query: any = {
+        id: Math.floor(Math.random() * 65535),
+        type: 'query',
+        flags: 0x0100,
+        questions: [{ type, class: 'IN', name }]
+      };
+      const buf = encode(query);
+      const timer = setTimeout(() => { client.close(); reject(new Error('upstream DNS timeout')); }, 3000);
+      client.on('message', (msg) => {
+        clearTimeout(timer);
+        try {
+          const decoded: any = decode(msg);
+          const answers = (decoded.answers || [])
+            .filter((a: any) => (a.type === type || a.type === 1) && typeof a.data === 'string')
+            .map((a: any) => ({ name: a.name, type: 1, TTL: a.ttl || 300, data: a.data }));
+          resolve(answers);
+        } catch (e) {
+          reject(e);
+        } finally {
+          client.close();
+        }
+      });
+      client.on('error', (err) => { clearTimeout(timer); client.close(); reject(err); });
+      client.send(buf, 53, this.config.upstreamDns);
+    });
+  }
+
   private async proxyToGoogleDns(query: any, rinfo: dgram.RemoteInfo): Promise<void> {
     return new Promise((resolve, reject) => {
       const client = dgram.createSocket('udp4');
@@ -204,8 +246,32 @@ export class DnsServer {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             status: 'success',
-            message: 'disable: /disable-overrides, enable: /enable-overrides',
+            message: 'disable: /disable-overrides, enable: /enable-overrides, query: /dns-query?name=...&type=A',
           }));
+          return;
+        }
+
+        if (url.startsWith('/dns-query')) {
+          // RFC 8484 / Google DoH JSON API style.
+          // Used by the WASM osakaOS browser app which can't emit UDP/53.
+          const qIndex = url.indexOf('?');
+          const params = new URLSearchParams(qIndex >= 0 ? url.substring(qIndex + 1) : '');
+          const name = params.get('name') || '';
+          const type = (params.get('type') || 'A').toUpperCase();
+          this.resolveOverHttp(name, type)
+            .then(answers => {
+              res.writeHead(200, { 'Content-Type': 'application/dns-json' });
+              res.end(JSON.stringify({
+                Status: 0,
+                Question: [{ name, type }],
+                Answer: answers
+              }));
+            })
+            .catch(err => {
+              console.error('DoH resolution failed:', err);
+              res.writeHead(502, { 'Content-Type': 'application/dns-json' });
+              res.end(JSON.stringify({ Status: 2, Question: [{ name, type }], Answer: [] }));
+            });
           return;
         }
       }

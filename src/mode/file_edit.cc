@@ -6,8 +6,16 @@ using namespace os::common;
 using namespace os::drivers;
 using namespace os::filesystem;
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
+#endif
+#ifdef __EMSCRIPTEN__
+extern "C" void putcharTUI(unsigned char, unsigned char, unsigned char, uint8_t, uint8_t);
+#else
 void putcharTUI(unsigned char, unsigned char, unsigned char, uint8_t, uint8_t);
+#endif
 void TUI(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, bool);
 void printfTUI(char*, uint8_t, uint8_t, uint8_t, uint8_t);
 

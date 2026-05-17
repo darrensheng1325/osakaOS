@@ -4,9 +4,11 @@ using namespace os;
 using namespace os::common;
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
-
-
+#endif
 Child::Child(void* value, Child* parent) {
 
 	this->value = value;

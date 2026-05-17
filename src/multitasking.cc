@@ -3,9 +3,11 @@
 using namespace os;
 using namespace os::common;
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
-
-
+#endif
 Task::Task(GlobalDescriptorTable *gdt, void(*entrypoint)(), char name[33], uint32_t intCount) {
 
 	//assign task name

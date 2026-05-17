@@ -1,4 +1,7 @@
 #include <gui/desktop.h>
+#ifdef __EMSCRIPTEN__
+#include <app/iframe.h>
+#endif
 
 using namespace os;
 using namespace os::common;
@@ -9,7 +12,7 @@ using namespace os::filesystem;
 
 
 void sleep(uint32_t);
-uint8_t* memset(uint8_t*, int, size_t);
+uint8_t* memset(uint8_t*, int, os::common::size_t);
 uint16_t prng();
 
 
@@ -102,6 +105,20 @@ CompositeWidget* Desktop::CreateChild(uint8_t appType, char* name, App* oldApp) 
 				color = WFFFFFF;
 			}
 			break;
+#ifdef __EMSCRIPTEN__
+		// Web build only. The IframeApp's "URL" comes through the
+		// `name` argument because CreateChild doesn't have a
+		// per-app payload field — the CLI command stuffs the URL
+		// into the window title and we read it back here.
+		case APP_TYPE_IFRAME:
+			{
+				IframeApp* iframeApp = (IframeApp*)memoryManager->malloc(sizeof(IframeApp));
+				new (iframeApp) IframeApp(name);
+				app = iframeApp;
+				color = WFFFFFF;
+			}
+			break;
+#endif
 		//create command line
 		//as deafult
 		default:
@@ -433,8 +450,8 @@ void Desktop::MouseDraw(common::GraphicsContext* gc) {
 
 	uint8_t mouseW = 13;
 	uint8_t mouseH = 20;
-	int8_t offsetX = 0;
-	int8_t offsetY = 0;
+	os::common::int8_t offsetX = 0;
+	os::common::int8_t offsetY = 0;
 
 
 	if (this->osaka->sim == false) {

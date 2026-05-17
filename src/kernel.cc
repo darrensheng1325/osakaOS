@@ -1,6 +1,11 @@
 #include <common/types.h>
 #include <gdt.h>
 #include <memorymanagement.h>
+#ifdef __EMSCRIPTEN__
+#include <new>
+#include <stdlib.h>
+#include <emscripten.h>
+#endif
 #include <art.h>
 #include <hardwarecommunication/interrupts.h>
 #include <hardwarecommunication/pci.h>
@@ -59,7 +64,8 @@ using namespace os::math;
 
 
 
-void putcharTUI(unsigned char ch, unsigned char forecolor, 
+#ifndef __EMSCRIPTEN__
+void putcharTUI(unsigned char ch, unsigned char forecolor,
 		unsigned char backcolor, uint8_t x, uint8_t y) {
 
 	uint16_t attrib = (backcolor << 4) | (forecolor & 0x0f);
@@ -67,6 +73,10 @@ void putcharTUI(unsigned char ch, unsigned char forecolor,
 	vidmem = (volatile uint16_t*)0xb8000 + (80*y+x);
 	*vidmem = ch | (attrib << 8);
 }
+#else
+extern "C" void putcharTUI(unsigned char ch, unsigned char forecolor,
+		unsigned char backcolor, uint8_t x, uint8_t y);
+#endif
 
 
 void TUI(uint8_t forecolor, uint8_t backcolor, 
@@ -140,6 +150,11 @@ uint16_t setTextColor(bool set, uint16_t color = 0x07) {
 }
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char* strChr);
+void printfLine(const char* str, uint8_t line);
+void printfHex(uint8_t key);
+#else
 //the main print function for textmode
 void printf(char* strChr) {
 	
@@ -244,7 +259,7 @@ void printf(char* strChr) {
 void printfLine(const char* str, uint8_t line) {
 
 	for (uint16_t i = 0; str[i] != '\0'; i++) {
-	
+
 		volatile uint16_t* vidmem = (volatile uint16_t*)0xb8000 + (80*line+i);
 		*vidmem = str[i] | 0x700;
 	}
@@ -261,23 +276,24 @@ void printfHex(uint8_t key) {
 	foo[1] = hex[key & 0x0F];
 	printf(foo);
 }
+#endif // __EMSCRIPTEN__
 
 
-uint8_t* memset(uint8_t* buf, int value, size_t n) {
+uint8_t* memset(uint8_t* buf, int value, os::common::size_t n) {
 
-	for (size_t i = 0; i < n; i++) {
-	
+	for (os::common::size_t i = 0; i < n; i++) {
+
 		buf[i] = value;
 	}
 	return buf;
 }
 
-uint32_t valCount(uint8_t* buf, uint8_t value, size_t n) {
+uint32_t valCount(uint8_t* buf, uint8_t value, os::common::size_t n) {
 
 	uint32_t retVal = 0;
-	
-	for (size_t i = 0; i < n; i++) {
-	
+
+	for (os::common::size_t i = 0; i < n; i++) {
+
 		retVal += (1 * (buf[i] == value));
 	}
 	return retVal;
@@ -560,30 +576,45 @@ uint32_t readCount() {
 	Port8Bit channel0(0x40);
 	Port8Bit commandPort(0x43);
 	
+	#ifndef __EMSCRIPTEN__
+	
 	asm("cli");
+	
+	#endif
 	commandPort.Write(0);
 	count = channel0.Read();
 	count |= channel0.Read() << 8;
+	#ifndef __EMSCRIPTEN__
 	asm("sti");
-	
+	#endif
 	return count;
 }
 
 void sleep(uint32_t ms) {
-	
+
+#ifdef __EMSCRIPTEN__
+	// We deliberately don't call emscripten_sleep here. That would
+	// suspend the wasm stack via asyncify and block JS event
+	// handlers (keyboard/mouse) from ccall'ing back in. Cap a tiny
+	// busy-wait so animations stay roughly in sync, and otherwise
+	// no-op — the emscripten main loop is the real animation clock.
+	if (ms > 30) ms = 30;
+	double target = emscripten_get_now() + (double)ms;
+	while (emscripten_get_now() < target) { /* short spin */ }
+#else
 	Port8Bit channel0(0x40);
 
 	for (uint32_t i = 0; i < ms; i++) {
-	
+
 		asm("cli");
+
 		channel0.Write(1193182/1000);
 		channel0.Write((1193182/1000) >> 8);
 		asm("sti");
-		
 		uint32_t start = readCount();
 		while ((start - readCount() < 1000)) {}
 	}
-
+#endif
 }
 
 
@@ -592,23 +623,32 @@ double getTicks() {
 	Port8Bit cmdPort(0x43);
 	Port8Bit channel0(0x40);
 
+	#ifndef __EMSCRIPTEN__
+
 	asm("cli");
 
+	#endif
 	channel0.Write(1193182/1000);
 	channel0.Write((1193182/1000) >> 8);
 	
+	#ifndef __EMSCRIPTEN__
+	
 	asm("sti");
 	
-	
+	#endif
+	#ifndef __EMSCRIPTEN__
 	asm("cli");
-	
+	#endif
 	cmdPort.Write(0x00);
 	
 	uint32_t count = channel0.Read();
 	count |= channel0.Read() << 8;
 	
+	#ifndef __EMSCRIPTEN__
+	
 	asm("sti");
-
+	
+	#endif
 	return (double)(count);
 }
 
@@ -658,8 +698,11 @@ uint16_t prng() {
 
 	//PIT pit;
 	
+	#ifndef __EMSCRIPTEN__
+	
 	asm("cli");
 	
+	#endif
 	Port8Bit cmdPort(0x43);
 	Port8Bit channel0(0x40);
 	cmdPort.Write(0x00);
@@ -667,10 +710,11 @@ uint16_t prng() {
 	uint32_t seed = channel0.Read();
 	seed |= channel0.Read() << 8;
 	
-	asm("sti");
-
-
+	#ifndef __EMSCRIPTEN__
 	
+	asm("sti");
+	
+	#endif
 	uint16_t lfsr = (uint16_t)seed;
 	uint16_t period = 0;
 
@@ -705,18 +749,28 @@ uint16_t hash(char* str) {
 
 void reboot() {
 
+#ifdef __EMSCRIPTEN__
+	// On bare metal we'd pulse the keyboard controller reset line
+	// via port 0x64. Under emscripten the ports are stubbed, so
+	// the keyboard-controller dance does nothing — ask the host
+	// page to reload itself instead, which is the closest analog
+	// to a system reset in the browser sandbox.
+	EM_ASM({ if (typeof window !== 'undefined') window.location.reload(); });
+	return;
+#else
 	asm volatile ("cli");
 
 	uint8_t read = 0x02;
 	Port8Bit resetPort(0x64);
 
 	while (read & 0x02) {
-	
+
 		read = resetPort.Read();
 	}
 
 	resetPort.Write(0xfe);
 	asm volatile ("hlt");
+#endif
 }
 
 uint32_t cmosDetectMemory() {
@@ -846,8 +900,129 @@ void DrawDesktopTask() {
 
 	Desktop* desktop = LoadDesktopForTask(false);
 
+#ifdef __EMSCRIPTEN__
+	// One-shot under emscripten: the emscripten main loop drives
+	// repeated invocations from JS between event-loop turns. We
+	// can't use ASYNCIFY sleep here — that would put the wasm in
+	// perpetual "in-flight" state and asyncify would reject the
+	// ccall() invocations triggered by keyboard / mouse events.
+	if (desktop) desktop->Draw(desktop->gc);
+#else
 	while (1) { desktop->Draw(desktop->gc); }
+#endif
 }
+
+#ifdef __EMSCRIPTEN__
+// Saved pointers so JS-side GUI-mode toggling can swap the keyboard
+// handler between the CLI handler and the desktop's focus manager.
+static KeyboardEventHandler* g_web_cli_handler = nullptr;
+static KeyboardEventHandler* g_web_gui_handler = nullptr;
+static bool g_web_in_gui_mode = false;
+
+// Free function used by emscripten_set_main_loop.
+extern "C" void web_kernel_tick() {
+	// In CLI mode, skip the desktop draw — it would push pixels to
+	// the graphics canvas via Module.drawFrameBuffer, which calls
+	// Module.switchToGraphicsMode every frame and would clobber the
+	// text canvas the user is currently looking at.
+	if (!g_web_in_gui_mode) return;
+	Desktop* desktop = LoadDesktopForTask(false);
+	if (desktop) desktop->Draw(desktop->gc);
+}
+
+// Declared in keyboard_web.cc; setKeyboardHandler updates the C-side
+// dispatch target used by handleKeyDown / handleKeyUp.
+extern "C" void setKeyboardHandler(void* handler);
+
+// Behaviour of the backtick key on the web build:
+//   - CLI mode:  switch to GUI desktop.
+//   - GUI mode:  forward 0x5b to the desktop's keyValue so the
+//                upstream Desktop::Draw branch toggles `osaka->sim`
+//                (the "Osaka room" simulation view) on/off. The
+//                caller stays in GUI mode.
+// `web_leave_gui_mode` (bound to Escape on the JS side) returns
+// the user back to the CLI text canvas.
+extern "C" EMSCRIPTEN_KEEPALIVE int web_toggle_gui_mode() {
+	if (g_web_in_gui_mode) {
+		// Already in GUI — forward the toggle to the desktop's
+		// simulation flag instead of leaving GUI mode.
+		Desktop* desktop = LoadDesktopForTask(false);
+		if (desktop) {
+			desktop->keyValue = 0x5b;
+		}
+		return 1;
+	}
+
+	g_web_in_gui_mode = true;
+	KeyboardEventHandler* target = g_web_gui_handler;
+	if (!target) {
+		g_web_in_gui_mode = false;
+		return 0;
+	}
+	setKeyboardHandler(target);
+	EM_ASM_({
+		Module._g_keyboardHandler = $0;
+		if (Module.switchToGraphicsMode) Module.switchToGraphicsMode();
+	}, (uintptr_t)target);
+	return 1;
+}
+
+// CLI command dispatch exposed to JavaScript. Module.ccall(
+// "executeCLICommand", null, ["string"], [cmd]) lands here; we
+// route through the live kbhandler (which inherits CommandLine
+// and owns the CLI hash table built in hash_cli_init).
+extern "C" EMSCRIPTEN_KEEPALIVE void executeCLICommand(char* cmd) {
+	if (!cmd || !g_web_cli_handler) return;
+	auto* kb = static_cast<CLIKeyboardEventHandler*>(g_web_cli_handler);
+	common::uint8_t len = 0;
+	while (cmd[len] != '\0' && len < 255) len++;
+	if (len == 0) return;
+	kb->command(cmd, len);
+	// Echo a trailing newline + prompt the same way the CLI key
+	// handler does so the text canvas advances visibly.
+	EM_ASM({
+		if (Module.safeReadAndPrintString) {
+			var p = Module._malloc(3);
+			HEAPU8[p] = 10;   // '\n'
+			HEAPU8[p+1] = 9;  // '\t' (CLI prompt sentinel)
+			HEAPU8[p+2] = 0;
+			Module.safeReadAndPrintString(p);
+			if (Module._free) Module._free(p);
+		}
+	});
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int web_leave_gui_mode() {
+	if (!g_web_in_gui_mode) return 0;
+
+	// Two-step exit:
+	//   1. If currently in the Osaka simulation room, Escape just
+	//      drops back to the regular desktop (sim ^= 1 via the
+	//      same keyValue path Desktop::Draw watches).
+	//   2. If already on the desktop, Escape returns to the CLI
+	//      text canvas.
+	Desktop* desktop = LoadDesktopForTask(false);
+	if (desktop && desktop->osaka && desktop->osaka->sim) {
+		desktop->keyValue = 0x5b;
+		return 1;
+	}
+
+	g_web_in_gui_mode = false;
+	if (desktop && desktop->osaka) {
+		// Belt-and-suspenders: make sure sim is off when we
+		// drop back so a fresh GUI re-entry never lands in sim.
+		desktop->osaka->sim = false;
+	}
+	KeyboardEventHandler* target = g_web_cli_handler;
+	if (!target) return 0;
+	setKeyboardHandler(target);
+	EM_ASM_({
+		Module._g_keyboardHandler = $0;
+		if (Module.switchToTextMode) Module.switchToTextMode();
+	}, (uintptr_t)target);
+	return 1;
+}
+#endif
 
 
 typedef void (*constructor)();
@@ -903,12 +1078,27 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	printf("Hello :^)\n");
 
 	GlobalDescriptorTable* gdt;
-	
+
 	struct MultibootInfo* mbi = (struct MultibootInfo*)multiboot_structure;
-	
+
+#ifdef __EMSCRIPTEN__
+	// Bare-metal MemoryManager would treat `heap` as a literal
+	// physical address (0x800000) — that overlaps with emscripten's
+	// own malloc arena in linear memory and silently corrupts it.
+	// Carve out a dedicated region with the system malloc instead.
+	const os::common::size_t kernelHeapSize = 16*1024*1024;
+	void* heapBase = ::malloc(kernelHeapSize);
+	if (!heapBase) {
+		printf("FATAL: kernel heap alloc failed\n");
+		return;
+	}
+	os::common::size_t heap = (os::common::size_t)heapBase;
+	MemoryManager memoryManager(heap, kernelHeapSize);
+#else
 	//heap manager
-	size_t heap = 8*1024*1024;
+	os::common::size_t heap = 8*1024*1024;
 	MemoryManager memoryManager(heap, mbi->memUpper*1024 - heap - 10*1024);
+#endif
 	
 	TaskManager taskManager(gdt, &memoryManager);
 	
@@ -1082,18 +1272,26 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	//printf("\n");
 
 	//if booted in vesa mode, skip to gui
+#ifdef __EMSCRIPTEN__
+	// Under emscripten there is no real keyboard ISR — keystrokes
+	// arrive via JS bridge into kbhandler, but the bare-metal CLI
+	// loop here would block the browser forever. Skip straight to
+	// GUI init; the JS driver pumps keyboard events into kbhandler
+	// while the asyncified DrawDesktopTask loop yields to it.
+	(void)graphicsAddress;
+#else
 	if (graphicsAddress == nullptr) {
-		
+
 		//this is the text-mode command line
-		while (keyboard.handler->keyValue != 0x5b) { //0x5b = command/windows key	
+		while (keyboard.handler->keyValue != 0x5b) { //0x5b = command/windows key
 
 			kbhandler->cli = true;
 
 			while (kbhandler->cliMode) {
 
 				kbhandler->cli = false;
-				kbhandler->modeSelect(kbhandler->cliMode, kbhandler->pressed, 
-						kbhandler->keyChar, kbhandler->ctrl, 0, 
+				kbhandler->modeSelect(kbhandler->cliMode, kbhandler->pressed,
+						kbhandler->keyChar, kbhandler->ctrl, 0,
 						&osakaFileSystem);
 			}
 		}
@@ -1106,19 +1304,41 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 		vga.colorRegisterWrite.Write(0);
 
 		for (uint16_t i = 0; i < 256; i++) {
-		
+
 			vga.colorDataPort.Write(((defaultPalette[i] >> 16) & 0xff) >> 2);
 			vga.colorDataPort.Write(((defaultPalette[i] >> 8) & 0xff) >> 2);
 			vga.colorDataPort.Write((defaultPalette[i] & 0xff) >> 2);
 		}
 	}
+#endif // __EMSCRIPTEN__
 	kbhandler->cli = true;
+#ifdef __EMSCRIPTEN__
+	// gui=false routes CommandLine::PrintCommand through the kernel's
+	// `printf` (which lands on the text canvas via safeReadAndPrintString).
+	// With gui=true it goes to appWindow->Print which writes into a
+	// CompositeWidget surface the user can't see — typed commands would
+	// echo to the canvas but their output would vanish.
+	kbhandler->gui = false;
+#else
 	kbhandler->gui = true;
+#endif
 
 
 	//initialize desktop
+#ifndef __EMSCRIPTEN__
+	// On bare metal the user enters GUI mode by pressing Cmd/Win
+	// after the text-mode CLI loop runs. We swap to a keyboard
+	// driver that forwards to the desktop's focus manager.
 	KeyboardDriver keyboardDesktop(&interrupts, &desktop);
 	drvManager.Replace(&keyboardDesktop, 0);
+#else
+	// Under emscripten we skipped the bare-metal CLI loop above.
+	// Keep keystrokes routed through `kbhandler` (the CLI keyboard
+	// handler) so typed characters get echoed onto the text canvas
+	// via printf, exactly like the bare-metal CLI experience.
+	// Module._g_keyboardHandler was set by the initial KeyboardDriver
+	// constructor and still points at kbhandler.
+#endif
 
 	desktop.CreateButton("CLI", APP_TYPE_TERMINAL, cliButton);
 	desktop.CreateButton("PNT", APP_TYPE_KASUGAPAINT, paintButton);
@@ -1134,10 +1354,28 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	Task guiTask(gdt, DrawDesktopTask, "osakaOS GUI", 0);
 	taskManager.AddTask(&guiTask);
 
-	
+#ifdef __EMSCRIPTEN__
+	// Save handler pointers so web_toggle_gui_mode() can swap between
+	// the CLI handler (kbhandler) and the desktop focus manager.
+	g_web_cli_handler = kbhandler;
+	g_web_gui_handler = &desktop;
+	g_web_in_gui_mode = false;
+#endif
+
+
+#ifdef __EMSCRIPTEN__
+	// Hand control to emscripten's main loop. simulate_infinite_loop=1
+	// throws a non-destructive exception that emscripten's runtime
+	// catches — the stack-allocated kernel objects above stay alive
+	// (LoadDesktopForTask captured `&desktop`) and the wasm is no
+	// longer in asyncify flight between frames, so JS keyboard /
+	// mouse handlers can ccall into the kernel without tripping the
+	// "async operation already in flight" assertion.
+	emscripten_set_main_loop(web_kernel_tick, 60, 1);
+#else
 	//this is the gui :)
 	while (1) {
-	
+
 		//this is the loop where the kernel
 		//exists in, the rest is handed off
 		//to the taskmanager, godspeed o7
@@ -1145,4 +1383,5 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 		//			      / \
 
 	}
+#endif
 }

@@ -70,7 +70,11 @@ bool PeripheralComponentInterconnectController::DeviceHasFunctions(uint16_t bus,
 }
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char* str);
+#else
 void printf(char* str);
+#endif
 void printfHex(uint8_t);
 
 

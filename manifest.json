@@ -1,0 +1,21 @@
+{
+    "short_name": "osakaOS",
+    "name": "osakaOS",
+    "start_url": "/osaka-os/index.html",
+    "display": "standalone",
+    "background_color": "#000000",
+    "theme_color": "#000000",
+    "description": "",
+    "display": "standalone",
+    "orientation": "landscape",
+    "scope": "/",
+    "lang": "en-US",
+    "prefer_related_applications": true,
+    "icons": [
+        {
+            "src": "/osaka-os/favicon.png",
+            "sizes": "256x256",
+            "type": "image/png"
+        }
+    ]
+}

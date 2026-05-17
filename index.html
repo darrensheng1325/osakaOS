@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>osakaOS - Web Edition</title>
+    <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/x-icon" href="favicon.png">
     <style>
         * {
@@ -132,56 +133,34 @@
             }
             
             if (!Module.ega_palette || Module.ega_palette.length === 0) {
-                Module.ega_palette = [];
-                
-                // Initialize EGA palette - use the same calculation as the original VGA driver
-                // VGA writes 6-bit values (0-63) to palette registers, which need to be scaled to 8-bit (0-255)
-                // Scale factor: 255/63 ≈ 4.048, but we use 4 for exact match with QEMU
+                // The canonical 256-entry osakaOS VGA palette, copied
+                // verbatim from OFS_File_To_Image.cc / vga.h's
+                // `defaultPalette[]`. The previous bit-math EGA palette
+                // produced wildly wrong colours (cyan desktop, magenta
+                // borders) because the kernel doesn't use a packed-RGB
+                // EGA layout — it indexes into this fixed table.
+                var osakaPalette = [
+                    0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA, 0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF,
+                    0x000000, 0x101010, 0x202020, 0x353535, 0x454545, 0x555555, 0x656565, 0x757575, 0x8A8A8A, 0x9A9A9A, 0xAAAAAA, 0xBABABA, 0xCACACA, 0xDFDFDF, 0xEFEFEF, 0xFFFFFF,
+                    0x0000FF, 0x4100FF, 0x8200FF, 0xBE00FF, 0xFF00FF, 0xFF00BE, 0xFF0082, 0xFF0041, 0xFF0000, 0xFF4100, 0xFF8200, 0xFFBE00, 0xFFFF00, 0xBEFF00, 0x82FF00, 0x41FF00,
+                    0x00FF00, 0x00FF41, 0x00FF82, 0x00FFBE, 0x00FFFF, 0x00BEFF, 0x0082FF, 0x0041FF, 0x8282FF, 0x9E82FF, 0xBE82FF, 0xDF82FF, 0xFF82FF, 0xFF82DF, 0xFF82BE, 0xFF829E,
+                    0xFF8282, 0xFF9E82, 0xFFBE82, 0xFFDF82, 0xFFFF82, 0xDFFF82, 0xBEFF82, 0x9EFF82, 0x82FF82, 0x82FF9E, 0x82FFBE, 0x82FFDF, 0x82FFFF, 0x82DFFF, 0x82BEFF, 0x829EFF,
+                    0xBABAFF, 0xCABAFF, 0xDFBAFF, 0xEFBAFF, 0xFFBAFF, 0xFFBAEF, 0xFFBADF, 0xFFBACA, 0xFFBABA, 0xFFCABA, 0xFFDFBA, 0xFFEFBA, 0xFFFFBA, 0xEFFFBA, 0xDFFFBA, 0xCAFFBA,
+                    0xBAFFBA, 0xBAFFCA, 0xBAFFDF, 0xBAFFEF, 0xBAFFFF, 0xBAEFFF, 0xBADFFF, 0xBACAFF, 0x000071, 0x1C0071, 0x390071, 0x550071, 0x710071, 0x710055, 0x710039, 0x71001C,
+                    0x710000, 0x711C00, 0x713900, 0x715500, 0x717100, 0x557100, 0x397100, 0x1C7100, 0x007100, 0x00711C, 0x007139, 0x007155, 0x007171, 0x005571, 0x003971, 0x001C71,
+                    0x393971, 0x453971, 0x553971, 0x613971, 0x713971, 0x713961, 0x713955, 0x713945, 0x713939, 0x714539, 0x715539, 0x716139, 0x717139, 0x617139, 0x557139, 0x457139,
+                    0x397139, 0x397145, 0x397155, 0x397161, 0x397171, 0x396171, 0x395571, 0x394571, 0x515171, 0x595171, 0x615171, 0x695171, 0x715171, 0x715169, 0x715161, 0x715159,
+                    0x715151, 0x715951, 0x716151, 0x716951, 0x717151, 0x697151, 0x617151, 0x597151, 0x517151, 0x517159, 0x517161, 0x517169, 0x517171, 0x516971, 0x516171, 0x515971,
+                    0x000041, 0x100041, 0x200041, 0x310041, 0x410041, 0x410031, 0x410020, 0x410010, 0x410000, 0x411000, 0x412000, 0x413100, 0x414100, 0x314100, 0x204100, 0x104100,
+                    0x004100, 0x004110, 0x004120, 0x004131, 0x004141, 0x003141, 0x002041, 0x001041, 0x202041, 0x282041, 0x312041, 0x392041, 0x412041, 0x412039, 0x412031, 0x412028,
+                    0x412020, 0x412820, 0x413120, 0x413920, 0x414120, 0x394120, 0x314120, 0x284120, 0x204120, 0x204128, 0x204131, 0x204139, 0x204141, 0x203941, 0x203141, 0x202841,
+                    0x2D2D41, 0x312D41, 0x352D41, 0x3D2D41, 0x412D41, 0x412D3D, 0x412D35, 0x412D31, 0x412D2D, 0x41312D, 0x41352D, 0x413D2D, 0x41412D, 0x3D412D, 0x35412D, 0x31412D,
+                    0x2D412D, 0x2D4131, 0x2D4135, 0x2D413D, 0x2D4141, 0x2D3D41, 0x2D3541, 0x2D3141, 0x0055AA, 0xAA0055, 0xAA5555, 0xAAAA55, 0xFF5500, 0xFF55AA, 0xFFAA00, 0xFFAA55
+                ];
+                Module.ega_palette = new Array(256);
                 for (var i = 0; i < 256; i++) {
-                    var r6 = 0, g6 = 0, b6 = 0; // 6-bit values (0-63)
-                    var r = 0, g = 0, b = 0;     // 8-bit values (0-255)
-                    switch (Math.floor(i / 64)) {
-                        case 0:
-                            r6 = (i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0);
-                            g6 = (i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0);
-                            b6 = (i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0);
-                            // Scale 6-bit to 8-bit: multiply by 4
-                            r = r6 * 4;
-                            g = g6 * 4;
-                            b = b6 * 4;
-                            break;
-                        case 1:
-                            r6 = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) >> 3;
-                            g6 = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) >> 3;
-                            b6 = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) >> 3;
-                            r = r6 * 4;
-                            g = g6 * 4;
-                            b = b6 * 4;
-                            break;
-                        case 2:
-                            r6 = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) << 3;
-                            g6 = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) << 3;
-                            b6 = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) << 3;
-                            // Clamp to 63 (6-bit max) before scaling
-                            if (r6 > 63) r6 = 63;
-                            if (g6 > 63) g6 = 63;
-                            if (b6 > 63) b6 = 63;
-                            r = r6 * 4;
-                            g = g6 * 4;
-                            b = b6 * 4;
-                            break;
-                        default:
-                            r = g = b = 0;
-                            break;
-                    }
-                    // Store palette in RGB format: [Red, Green, Blue]
-                    Module.ega_palette[i] = [r, g, b];
-                }
-                
-                // Debug: verify color 0 is black
-                console.log('[JS] EGA palette initialized early. Color 0 (black):', Module.ega_palette[0]);
-                if (Module.ega_palette[0][0] !== 0 || Module.ega_palette[0][1] !== 0 || Module.ega_palette[0][2] !== 0) {
-                    console.error('[JS] ERROR: Color 0 is not black!', Module.ega_palette[0]);
+                    var rgb = osakaPalette[i] | 0;
+                    Module.ega_palette[i] = [(rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff];
                 }
             }
         }
@@ -476,27 +455,49 @@
                             return;
                         }
                         var pixels = heapU8.subarray(pixelPtr, pixelPtr + 64000);
-                        for (var i = 0; i < 64000; i++) {
-                            var colorIndex = pixels[i];
-                            var r = 0, g = 0, b = 0;
-                            if (Module.ega_palette && Module.ega_palette[colorIndex]) {
-                                r = Module.ega_palette[colorIndex][0];
-                                g = Module.ega_palette[colorIndex][1];
-                                b = Module.ega_palette[colorIndex][2];
-                            } else {
-                                r = (colorIndex & 0xE0);
-                                g = ((colorIndex & 0x1C) << 3);
-                                b = ((colorIndex & 0x03) << 6);
+                        // Build the canonical osakaOS 256-colour LUT once.
+                        // Matches defaultPalette[] from OFS_File_To_Image.cc
+                        // / include/drivers/vga.h. The previous packed-RGB
+                        // bit-math fallback produced the cyan/magenta
+                        // disaster we were seeing.
+                        if (!Module.__osaka_pal_lut) {
+                            var ip = [
+                                0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA, 0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF,
+                                0x000000, 0x101010, 0x202020, 0x353535, 0x454545, 0x555555, 0x656565, 0x757575, 0x8A8A8A, 0x9A9A9A, 0xAAAAAA, 0xBABABA, 0xCACACA, 0xDFDFDF, 0xEFEFEF, 0xFFFFFF,
+                                0x0000FF, 0x4100FF, 0x8200FF, 0xBE00FF, 0xFF00FF, 0xFF00BE, 0xFF0082, 0xFF0041, 0xFF0000, 0xFF4100, 0xFF8200, 0xFFBE00, 0xFFFF00, 0xBEFF00, 0x82FF00, 0x41FF00,
+                                0x00FF00, 0x00FF41, 0x00FF82, 0x00FFBE, 0x00FFFF, 0x00BEFF, 0x0082FF, 0x0041FF, 0x8282FF, 0x9E82FF, 0xBE82FF, 0xDF82FF, 0xFF82FF, 0xFF82DF, 0xFF82BE, 0xFF829E,
+                                0xFF8282, 0xFF9E82, 0xFFBE82, 0xFFDF82, 0xFFFF82, 0xDFFF82, 0xBEFF82, 0x9EFF82, 0x82FF82, 0x82FF9E, 0x82FFBE, 0x82FFDF, 0x82FFFF, 0x82DFFF, 0x82BEFF, 0x829EFF,
+                                0xBABAFF, 0xCABAFF, 0xDFBAFF, 0xEFBAFF, 0xFFBAFF, 0xFFBAEF, 0xFFBADF, 0xFFBACA, 0xFFBABA, 0xFFCABA, 0xFFDFBA, 0xFFEFBA, 0xFFFFBA, 0xEFFFBA, 0xDFFFBA, 0xCAFFBA,
+                                0xBAFFBA, 0xBAFFCA, 0xBAFFDF, 0xBAFFEF, 0xBAFFFF, 0xBAEFFF, 0xBADFFF, 0xBACAFF, 0x000071, 0x1C0071, 0x390071, 0x550071, 0x710071, 0x710055, 0x710039, 0x71001C,
+                                0x710000, 0x711C00, 0x713900, 0x715500, 0x717100, 0x557100, 0x397100, 0x1C7100, 0x007100, 0x00711C, 0x007139, 0x007155, 0x007171, 0x005571, 0x003971, 0x001C71,
+                                0x393971, 0x453971, 0x553971, 0x613971, 0x713971, 0x713961, 0x713955, 0x713945, 0x713939, 0x714539, 0x715539, 0x716139, 0x717139, 0x617139, 0x557139, 0x457139,
+                                0x397139, 0x397145, 0x397155, 0x397161, 0x397171, 0x396171, 0x395571, 0x394571, 0x515171, 0x595171, 0x615171, 0x695171, 0x715171, 0x715169, 0x715161, 0x715159,
+                                0x715151, 0x715951, 0x716151, 0x716951, 0x717151, 0x697151, 0x617151, 0x597151, 0x517151, 0x517159, 0x517161, 0x517169, 0x517171, 0x516971, 0x516171, 0x515971,
+                                0x000041, 0x100041, 0x200041, 0x310041, 0x410041, 0x410031, 0x410020, 0x410010, 0x410000, 0x411000, 0x412000, 0x413100, 0x414100, 0x314100, 0x204100, 0x104100,
+                                0x004100, 0x004110, 0x004120, 0x004131, 0x004141, 0x003141, 0x002041, 0x001041, 0x202041, 0x282041, 0x312041, 0x392041, 0x412041, 0x412039, 0x412031, 0x412028,
+                                0x412020, 0x412820, 0x413120, 0x413920, 0x414120, 0x394120, 0x314120, 0x284120, 0x204120, 0x204128, 0x204131, 0x204139, 0x204141, 0x203941, 0x203141, 0x202841,
+                                0x2D2D41, 0x312D41, 0x352D41, 0x3D2D41, 0x412D41, 0x412D3D, 0x412D35, 0x412D31, 0x412D2D, 0x41312D, 0x41352D, 0x413D2D, 0x41412D, 0x3D412D, 0x35412D, 0x31412D,
+                                0x2D412D, 0x2D4131, 0x2D4135, 0x2D413D, 0x2D4141, 0x2D3D41, 0x2D3541, 0x2D3141, 0x0055AA, 0xAA0055, 0xAA5555, 0xAAAA55, 0xFF5500, 0xFF55AA, 0xFFAA00, 0xFFAA55
+                            ];
+                            var lut = new Uint8Array(256 * 3);
+                            for (var k = 0; k < 256; k++) {
+                                var rgb = ip[k] | 0;
+                                lut[k*3]     = (rgb >> 16) & 0xff;
+                                lut[k*3 + 1] = (rgb >> 8) & 0xff;
+                                lut[k*3 + 2] = rgb & 0xff;
                             }
-                            // ImageData format: RGBA (Red, Green, Blue, Alpha) - 4 bytes per pixel
+                            Module.__osaka_pal_lut = lut;
+                        }
+                        var palLut = Module.__osaka_pal_lut;
+                        for (var i = 0; i < 64000; i++) {
+                            var p = pixels[i] * 3;
                             var idx = i * 4;
-                            data[idx] = r;     // Red (0-255)
-                            data[idx + 1] = g; // Green (0-255)
-                            data[idx + 2] = b; // Blue (0-255)
-                            data[idx + 3] = 255; // Alpha (opacity, 255 = fully opaque)
+                            data[idx]     = palLut[p];
+                            data[idx + 1] = palLut[p + 1];
+                            data[idx + 2] = palLut[p + 2];
+                            data[idx + 3] = 255;
                         }
                         ctx.putImageData(imageData, 0, 0);
-                        // console.log('[JS] renderPixels: pixels rendered to canvas');
                     };
                     // console.log('[JS] renderPixels re-attached');
                 } else {
@@ -556,6 +557,72 @@
                     // console.log('[JS] switchToGraphicsMode re-attached');
                 } else {
                     // console.log('[JS] switchToGraphicsMode is available');
+                }
+
+                // Re-attach switchToTextMode if missing (emscripten's
+                // Module-merge can drop properties defined in the
+                // initial Module literal).
+                if (!Module.switchToTextMode) {
+                    console.error('[JS] switchToTextMode missing after runtime init! Re-attaching...');
+                    Module.switchToTextMode = function() {
+                        var textCanvas = document.getElementById('osaka-text-canvas');
+                        var graphicsCanvas = document.getElementById('osaka-canvas');
+                        if (textCanvas && graphicsCanvas) {
+                            textCanvas.style.display = 'block';
+                            graphicsCanvas.style.display = 'none';
+                            textCanvas.focus();
+                        }
+                    };
+                }
+
+                // Re-attach drawFrameBuffer if missing — the wasm
+                // VGA driver calls this every frame via EM_ASM to push
+                // the indexed framebuffer to the graphics canvas.
+                if (!Module.drawFrameBuffer) {
+                    console.error('[JS] drawFrameBuffer missing after runtime init! Re-attaching...');
+                    Module.drawFrameBuffer = function(pixelPtr, w, h) {
+                        if (Module.renderPixels) { Module.renderPixels(pixelPtr); }
+                    };
+                }
+
+                // Re-attach httpFetchOverWeb if missing — the kernel
+                // browser app calls this via EM_ASM to issue HTTP
+                // requests through a real `fetch()` (the kernel TCP
+                // stack can't actually open sockets in a browser).
+                if (!Module.httpFetchOverWeb) {
+                    console.error('[JS] httpFetchOverWeb missing after runtime init! Re-attaching...');
+                    Module.httpFetchOverWeb = function(domainOrUrl, requestId) {
+                        try {
+                            var override = (typeof window !== 'undefined') ? window.osakaHttpProxy : null;
+                            var url = domainOrUrl;
+                            if (override && typeof override === 'string') {
+                                url = override.replace(/\/$/, '') + '/' + encodeURIComponent(domainOrUrl);
+                            } else if (!/^https?:\/\//i.test(url)) {
+                                url = 'http://' + url;
+                            }
+                            fetch(url, { method: 'GET', headers: { 'Accept': 'text/html,*/*' }, mode: 'cors', redirect: 'follow' })
+                              .then(function(resp) { return resp.text().then(function(b){ return {status:resp.status,statusText:resp.statusText,body:b}; }); })
+                              .then(function(r) {
+                                var preamble = 'HTTP/1.1 ' + r.status + ' ' + (r.statusText || 'OK') + '\r\n' +
+                                               'Server: osakaOS-web\r\nContent-Type: text/html\r\n' +
+                                               'Content-Length: ' + r.body.length + '\r\nConnection: close\r\n\r\n';
+                                var bytes = new TextEncoder().encode(preamble + r.body);
+                                if (!Module._malloc || !Module._httpFetchCallback) return;
+                                var ptr = Module._malloc(bytes.length);
+                                if (!ptr) return;
+                                HEAPU8.set(bytes, ptr);
+                                Module._httpFetchCallback(requestId, ptr, bytes.length);
+                                if (Module._free) Module._free(ptr);
+                              })
+                              .catch(function(err) {
+                                console.warn('[JS] HTTP fetch failed for', url, err);
+                                if (Module._httpFetchFail) Module._httpFetchFail(requestId);
+                              });
+                        } catch (e) {
+                            console.error('[JS] httpFetchOverWeb threw', e);
+                            if (Module._httpFetchFail) Module._httpFetchFail(requestId);
+                        }
+                    };
                 }
                 
                 var loading = document.getElementById('loading');
@@ -659,6 +726,15 @@
                                 console.error('[JS] Stack:', e.stack);
                                 throw e;
                             }
+                            // Kernel init finished — hide the page
+                            // chrome (title + loading status) so it
+                            // doesn't sit on top of the kernel canvas.
+                            var titleEl = document.getElementById('title');
+                            if (titleEl) titleEl.style.display = 'none';
+                            var loadingEl = document.getElementById('loading');
+                            if (loadingEl) loadingEl.style.display = 'none';
+                            var statusEl = document.getElementById('status');
+                            if (statusEl) statusEl.style.display = 'none';
                         } catch (e) {
                             console.error('[JS] Error starting kernel:', e);
                             console.error('[JS] Stack:', e.stack);
@@ -897,35 +973,165 @@
                 var pixels = heapU8.subarray(pixelPtr, pixelPtr + 64000);
                 console.log('[JS] Pixels array length:', pixels.length, 'first few values:', pixels[0], pixels[1], pixels[2]);
                 
-                for (var i = 0; i < 64000; i++) {
-                    var colorIndex = pixels[i];
-                    var r = 0, g = 0, b = 0;
-                    
-                    // Use EGA palette if available
-                    // Palette format: [Red, Green, Blue]
-                    if (Module.ega_palette && Module.ega_palette[colorIndex]) {
-                        r = Module.ega_palette[colorIndex][0]; // Red
-                        g = Module.ega_palette[colorIndex][1]; // Green
-                        b = Module.ega_palette[colorIndex][2]; // Blue
-                    } else {
-                        // Fallback: simple color mapping
-                        r = (colorIndex & 0xE0);
-                        g = ((colorIndex & 0x1C) << 3);
-                        b = ((colorIndex & 0x03) << 6);
+                // Build/reuse the canonical 256-entry osakaOS palette
+                // LUT. Don't trust Module.ega_palette to survive across
+                // emscripten init.
+                if (!Module.__osaka_pal_lut) {
+                    var ip = [
+                        0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA, 0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF,
+                        0x000000, 0x101010, 0x202020, 0x353535, 0x454545, 0x555555, 0x656565, 0x757575, 0x8A8A8A, 0x9A9A9A, 0xAAAAAA, 0xBABABA, 0xCACACA, 0xDFDFDF, 0xEFEFEF, 0xFFFFFF,
+                        0x0000FF, 0x4100FF, 0x8200FF, 0xBE00FF, 0xFF00FF, 0xFF00BE, 0xFF0082, 0xFF0041, 0xFF0000, 0xFF4100, 0xFF8200, 0xFFBE00, 0xFFFF00, 0xBEFF00, 0x82FF00, 0x41FF00,
+                        0x00FF00, 0x00FF41, 0x00FF82, 0x00FFBE, 0x00FFFF, 0x00BEFF, 0x0082FF, 0x0041FF, 0x8282FF, 0x9E82FF, 0xBE82FF, 0xDF82FF, 0xFF82FF, 0xFF82DF, 0xFF82BE, 0xFF829E,
+                        0xFF8282, 0xFF9E82, 0xFFBE82, 0xFFDF82, 0xFFFF82, 0xDFFF82, 0xBEFF82, 0x9EFF82, 0x82FF82, 0x82FF9E, 0x82FFBE, 0x82FFDF, 0x82FFFF, 0x82DFFF, 0x82BEFF, 0x829EFF,
+                        0xBABAFF, 0xCABAFF, 0xDFBAFF, 0xEFBAFF, 0xFFBAFF, 0xFFBAEF, 0xFFBADF, 0xFFBACA, 0xFFBABA, 0xFFCABA, 0xFFDFBA, 0xFFEFBA, 0xFFFFBA, 0xEFFFBA, 0xDFFFBA, 0xCAFFBA,
+                        0xBAFFBA, 0xBAFFCA, 0xBAFFDF, 0xBAFFEF, 0xBAFFFF, 0xBAEFFF, 0xBADFFF, 0xBACAFF, 0x000071, 0x1C0071, 0x390071, 0x550071, 0x710071, 0x710055, 0x710039, 0x71001C,
+                        0x710000, 0x711C00, 0x713900, 0x715500, 0x717100, 0x557100, 0x397100, 0x1C7100, 0x007100, 0x00711C, 0x007139, 0x007155, 0x007171, 0x005571, 0x003971, 0x001C71,
+                        0x393971, 0x453971, 0x553971, 0x613971, 0x713971, 0x713961, 0x713955, 0x713945, 0x713939, 0x714539, 0x715539, 0x716139, 0x717139, 0x617139, 0x557139, 0x457139,
+                        0x397139, 0x397145, 0x397155, 0x397161, 0x397171, 0x396171, 0x395571, 0x394571, 0x515171, 0x595171, 0x615171, 0x695171, 0x715171, 0x715169, 0x715161, 0x715159,
+                        0x715151, 0x715951, 0x716151, 0x716951, 0x717151, 0x697151, 0x617151, 0x597151, 0x517151, 0x517159, 0x517161, 0x517169, 0x517171, 0x516971, 0x516171, 0x515971,
+                        0x000041, 0x100041, 0x200041, 0x310041, 0x410041, 0x410031, 0x410020, 0x410010, 0x410000, 0x411000, 0x412000, 0x413100, 0x414100, 0x314100, 0x204100, 0x104100,
+                        0x004100, 0x004110, 0x004120, 0x004131, 0x004141, 0x003141, 0x002041, 0x001041, 0x202041, 0x282041, 0x312041, 0x392041, 0x412041, 0x412039, 0x412031, 0x412028,
+                        0x412020, 0x412820, 0x413120, 0x413920, 0x414120, 0x394120, 0x314120, 0x284120, 0x204120, 0x204128, 0x204131, 0x204139, 0x204141, 0x203941, 0x203141, 0x202841,
+                        0x2D2D41, 0x312D41, 0x352D41, 0x3D2D41, 0x412D41, 0x412D3D, 0x412D35, 0x412D31, 0x412D2D, 0x41312D, 0x41352D, 0x413D2D, 0x41412D, 0x3D412D, 0x35412D, 0x31412D,
+                        0x2D412D, 0x2D4131, 0x2D4135, 0x2D413D, 0x2D4141, 0x2D3D41, 0x2D3541, 0x2D3141, 0x0055AA, 0xAA0055, 0xAA5555, 0xAAAA55, 0xFF5500, 0xFF55AA, 0xFFAA00, 0xFFAA55
+                    ];
+                    var lut = new Uint8Array(256 * 3);
+                    for (var k = 0; k < 256; k++) {
+                        var rgb = ip[k] | 0;
+                        lut[k*3]     = (rgb >> 16) & 0xff;
+                        lut[k*3 + 1] = (rgb >> 8) & 0xff;
+                        lut[k*3 + 2] = rgb & 0xff;
                     }
-                    
-                    var idx = i * 4;
-                    data[idx] = r;     // R
-                    data[idx + 1] = g; // G
-                    data[idx + 2] = b; // B
-                    data[idx + 3] = 255; // A
+                    Module.__osaka_pal_lut = lut;
                 }
-                
+                var palLut = Module.__osaka_pal_lut;
+                for (var i = 0; i < 64000; i++) {
+                    var p = pixels[i] * 3;
+                    var idx = i * 4;
+                    data[idx]     = palLut[p];
+                    data[idx + 1] = palLut[p + 1];
+                    data[idx + 2] = palLut[p + 2];
+                    data[idx + 3] = 255;
+                }
                 ctx.putImageData(imageData, 0, 0);
-                console.log('[JS] Canvas updated successfully, rendered', 64000, 'pixels');
             }
         };
-        
+
+        // ----- DNS-over-HTTP bridge -----
+        // The WASM browser app cannot send UDP/53 packets directly, so
+        // it asks JavaScript to resolve hostnames against the DNS server
+        // shipped in dns/ (which speaks DoH on the configured port).
+        // The compile-time defaults (DNS_SERVER_IP_STR / DNS_SERVER_PORT)
+        // come from Makefile.emscripten; this function lets the user
+        // override them at runtime via window.osakaDnsServer = {host,port}.
+        Module.dnsResolveOverHttp = function(hostname, dnsId, defaultHost, defaultPort) {
+            try {
+                var override = (typeof window !== 'undefined') ? window.osakaDnsServer : null;
+                var host = (override && override.host) || defaultHost || '127.0.0.1';
+                var port = (override && override.port) || defaultPort || 8053;
+                var scheme = (override && override.scheme) || 'http';
+                var url = scheme + '://' + host + ':' + port + '/dns-query?name=' +
+                    encodeURIComponent(hostname) + '&type=A';
+                fetch(url, { headers: { 'Accept': 'application/dns-json' } })
+                    .then(function(r) { return r.json(); })
+                    .then(function(json) {
+                        var ip = 0;
+                        if (json && json.Answer) {
+                            for (var i = 0; i < json.Answer.length; i++) {
+                                if (json.Answer[i].type === 1 && typeof json.Answer[i].data === 'string') {
+                                    var parts = json.Answer[i].data.split('.');
+                                    if (parts.length === 4) {
+                                        // Build BE (network) order packed in little-endian uint32
+                                        // matching what str2ip() produces inside the kernel.
+                                        ip = ((parts[3] & 0xff) << 24) |
+                                             ((parts[2] & 0xff) << 16) |
+                                             ((parts[1] & 0xff) << 8)  |
+                                             ((parts[0] & 0xff));
+                                        ip = ip >>> 0;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (Module._dnsResolveCallback) {
+                            Module._dnsResolveCallback(dnsId, ip);
+                        }
+                    })
+                    .catch(function(err) {
+                        console.warn('[JS] DoH lookup failed for', hostname, err);
+                        if (Module._dnsResolveCallback) Module._dnsResolveCallback(dnsId, 0);
+                    });
+            } catch (e) {
+                console.error('[JS] dnsResolveOverHttp threw', e);
+            }
+        };
+
+        // ----- HTTP fetch bridge -----
+        // The WASM kernel's TCP stack has no way to actually open a
+        // socket from inside the browser sandbox, so the Shinosaka
+        // browser app calls into us instead. We `fetch()` the URL,
+        // synthesize a minimal HTTP/1.1 response (status line, a few
+        // headers, blank line, body) so the kernel's
+        // HandleResponseHTTP/AllocateMemoryHTML/RenderHTML pipeline
+        // sees exactly what it would have gotten over the wire, and
+        // hand the bytes back through `_httpFetchCallback`.
+        Module.httpFetchOverWeb = function(domainOrUrl, requestId) {
+            try {
+                var override = (typeof window !== 'undefined') ? window.osakaHttpProxy : null;
+                var url = domainOrUrl;
+                if (override && typeof override === 'string') {
+                    // Proxy mode: rewrite to <proxy>/<encoded url>.
+                    url = override.replace(/\/$/, '') + '/' + encodeURIComponent(domainOrUrl);
+                } else if (!/^https?:\/\//i.test(url)) {
+                    url = 'http://' + url;
+                }
+                fetch(url, {
+                    method: 'GET',
+                    headers: { 'Accept': 'text/html,*/*' },
+                    mode: 'cors',
+                    redirect: 'follow'
+                }).then(function(resp) {
+                    return resp.text().then(function(body) {
+                        return { status: resp.status, statusText: resp.statusText, body: body };
+                    });
+                }).then(function(r) {
+                    var preamble = 'HTTP/1.1 ' + r.status + ' ' + (r.statusText || 'OK') + '\r\n' +
+                                   'Server: osakaOS-web\r\n' +
+                                   'Content-Type: text/html\r\n' +
+                                   'Content-Length: ' + r.body.length + '\r\n' +
+                                   'Connection: close\r\n' +
+                                   '\r\n';
+                    var full = preamble + r.body;
+                    var bytes = new TextEncoder().encode(full);
+                    if (!Module._malloc || !Module._httpFetchCallback) {
+                        console.error('[JS] httpFetchOverWeb missing _malloc/_httpFetchCallback');
+                        return;
+                    }
+                    var ptr = Module._malloc(bytes.length);
+                    if (!ptr) {
+                        console.error('[JS] httpFetchOverWeb malloc failed');
+                        return;
+                    }
+                    HEAPU8.set(bytes, ptr);
+                    Module._httpFetchCallback(requestId, ptr, bytes.length);
+                    if (Module._free) Module._free(ptr);
+                }).catch(function(err) {
+                    console.warn('[JS] HTTP fetch failed for', url, err);
+                    if (Module._httpFetchFail) Module._httpFetchFail(requestId);
+                });
+            } catch (e) {
+                console.error('[JS] httpFetchOverWeb threw', e);
+                if (Module._httpFetchFail) Module._httpFetchFail(requestId);
+            }
+        };
+
+        // Pushed pixel buffer (320x200 indexed) from the kernel to the
+        // graphics canvas. Mirrors renderPixels() above but takes the
+        // canvas dimensions so the kernel can drive higher modes too.
+        Module.drawFrameBuffer = function(pixelPtr, w, h) {
+            if (Module.renderPixels) { Module.renderPixels(pixelPtr); }
+        };
+
         // Function to switch to text mode (show text canvas, hide graphics canvas)
         Module.switchToTextMode = function() {
             var textCanvas = document.getElementById('osaka-text-canvas');
@@ -1260,114 +1466,60 @@
             var pixels = heapU8.subarray(pixelPtr, pixelPtr + 64000);
             console.log('[JS] Pixels array length:', pixels.length, 'first few values:', pixels[0], pixels[1], pixels[2]);
             
+            // Lazy-init the inline palette table — Module.ega_palette
+            // can be undefined here even after onRuntimeInitialized
+            // (emscripten replaces some properties), and the old
+            // bit-math fallback produced wildly wrong colours. Use
+            // the canonical 256-entry table from OFS_File_To_Image.cc.
+            if (!Module.__osaka_pal_lut) {
+                var ip = [
+                    0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA, 0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF,
+                    0x000000, 0x101010, 0x202020, 0x353535, 0x454545, 0x555555, 0x656565, 0x757575, 0x8A8A8A, 0x9A9A9A, 0xAAAAAA, 0xBABABA, 0xCACACA, 0xDFDFDF, 0xEFEFEF, 0xFFFFFF,
+                    0x0000FF, 0x4100FF, 0x8200FF, 0xBE00FF, 0xFF00FF, 0xFF00BE, 0xFF0082, 0xFF0041, 0xFF0000, 0xFF4100, 0xFF8200, 0xFFBE00, 0xFFFF00, 0xBEFF00, 0x82FF00, 0x41FF00,
+                    0x00FF00, 0x00FF41, 0x00FF82, 0x00FFBE, 0x00FFFF, 0x00BEFF, 0x0082FF, 0x0041FF, 0x8282FF, 0x9E82FF, 0xBE82FF, 0xDF82FF, 0xFF82FF, 0xFF82DF, 0xFF82BE, 0xFF829E,
+                    0xFF8282, 0xFF9E82, 0xFFBE82, 0xFFDF82, 0xFFFF82, 0xDFFF82, 0xBEFF82, 0x9EFF82, 0x82FF82, 0x82FF9E, 0x82FFBE, 0x82FFDF, 0x82FFFF, 0x82DFFF, 0x82BEFF, 0x829EFF,
+                    0xBABAFF, 0xCABAFF, 0xDFBAFF, 0xEFBAFF, 0xFFBAFF, 0xFFBAEF, 0xFFBADF, 0xFFBACA, 0xFFBABA, 0xFFCABA, 0xFFDFBA, 0xFFEFBA, 0xFFFFBA, 0xEFFFBA, 0xDFFFBA, 0xCAFFBA,
+                    0xBAFFBA, 0xBAFFCA, 0xBAFFDF, 0xBAFFEF, 0xBAFFFF, 0xBAEFFF, 0xBADFFF, 0xBACAFF, 0x000071, 0x1C0071, 0x390071, 0x550071, 0x710071, 0x710055, 0x710039, 0x71001C,
+                    0x710000, 0x711C00, 0x713900, 0x715500, 0x717100, 0x557100, 0x397100, 0x1C7100, 0x007100, 0x00711C, 0x007139, 0x007155, 0x007171, 0x005571, 0x003971, 0x001C71,
+                    0x393971, 0x453971, 0x553971, 0x613971, 0x713971, 0x713961, 0x713955, 0x713945, 0x713939, 0x714539, 0x715539, 0x716139, 0x717139, 0x617139, 0x557139, 0x457139,
+                    0x397139, 0x397145, 0x397155, 0x397161, 0x397171, 0x396171, 0x395571, 0x394571, 0x515171, 0x595171, 0x615171, 0x695171, 0x715171, 0x715169, 0x715161, 0x715159,
+                    0x715151, 0x715951, 0x716151, 0x716951, 0x717151, 0x697151, 0x617151, 0x597151, 0x517151, 0x517159, 0x517161, 0x517169, 0x517171, 0x516971, 0x516171, 0x515971,
+                    0x000041, 0x100041, 0x200041, 0x310041, 0x410041, 0x410031, 0x410020, 0x410010, 0x410000, 0x411000, 0x412000, 0x413100, 0x414100, 0x314100, 0x204100, 0x104100,
+                    0x004100, 0x004110, 0x004120, 0x004131, 0x004141, 0x003141, 0x002041, 0x001041, 0x202041, 0x282041, 0x312041, 0x392041, 0x412041, 0x412039, 0x412031, 0x412028,
+                    0x412020, 0x412820, 0x413120, 0x413920, 0x414120, 0x394120, 0x314120, 0x284120, 0x204120, 0x204128, 0x204131, 0x204139, 0x204141, 0x203941, 0x203141, 0x202841,
+                    0x2D2D41, 0x312D41, 0x352D41, 0x3D2D41, 0x412D41, 0x412D3D, 0x412D35, 0x412D31, 0x412D2D, 0x41312D, 0x41352D, 0x413D2D, 0x41412D, 0x3D412D, 0x35412D, 0x31412D,
+                    0x2D412D, 0x2D4131, 0x2D4135, 0x2D413D, 0x2D4141, 0x2D3D41, 0x2D3541, 0x2D3141, 0x0055AA, 0xAA0055, 0xAA5555, 0xAAAA55, 0xFF5500, 0xFF55AA, 0xFFAA00, 0xFFAA55
+                ];
+                var lut = new Uint8Array(256 * 3);
+                for (var k = 0; k < 256; k++) {
+                    var rgb = ip[k] | 0;
+                    lut[k*3]     = (rgb >> 16) & 0xff;
+                    lut[k*3 + 1] = (rgb >> 8) & 0xff;
+                    lut[k*3 + 2] = rgb & 0xff;
+                }
+                Module.__osaka_pal_lut = lut;
+            }
+            var palLut = Module.__osaka_pal_lut;
             for (var i = 0; i < 64000; i++) {
                 var colorIdx = pixels[i];
-                var rVal = 0, gVal = 0, bVal = 0;
-                
-                // Palette format: [Red, Green, Blue]
-                if (Module.ega_palette && Module.ega_palette[colorIdx] && Array.isArray(Module.ega_palette[colorIdx])) {
-                    rVal = Module.ega_palette[colorIdx][0]; // Red
-                    gVal = Module.ega_palette[colorIdx][1]; // Green
-                    bVal = Module.ega_palette[colorIdx][2]; // Blue
-                } else {
-                    console.log('[JS] Fallback: calculating color on the fly');
-                    // Fallback: calculate color on the fly (shouldn't happen if palette is initialized)
-                    var color = colorIdx;
-                    var r6 = 0, g6 = 0, b6 = 0;
-                    switch (Math.floor(color / 64)) {
-                        case 0:
-                            r6 = (color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0);
-                            g6 = (color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0);
-                            b6 = (color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0);
-                            break;
-                        case 1:
-                            r6 = ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) >> 3;
-                            g6 = ((color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0)) >> 3;
-                            b6 = ((color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0)) >> 3;
-                            break;
-                        case 2:
-                            r6 = ((color & 0x20 ? 0x15 : 0) | (color & 0x04 ? 0x2a : 0)) << 3;
-                            g6 = ((color & 0x10 ? 0x15 : 0) | (color & 0x02 ? 0x2a : 0)) << 3;
-                            b6 = ((color & 0x08 ? 0x15 : 0) | (color & 0x01 ? 0x2a : 0)) << 3;
-                            if (r6 > 63) r6 = 63;
-                            if (g6 > 63) g6 = 63;
-                            if (b6 > 63) b6 = 63;
-                            break;
-                        default:
-                            r6 = g6 = b6 = 0;
-                            break;
-                    }
-                    // Scale 6-bit to 8-bit
-                    rVal = r6 * 4;
-                    gVal = g6 * 4;
-                    bVal = b6 * 4;
-                }
-                
-                // ImageData format: RGBA (Red, Green, Blue, Alpha) - 4 bytes per pixel
+                var p = colorIdx * 3;
                 var idx = i * 4;
-                data[idx] = rVal;     // Red (0-255)
-                data[idx + 1] = gVal; // Green (0-255)
-                data[idx + 2] = bVal; // Blue (0-255)
-                data[idx + 3] = 255;  // Alpha (opacity, 255 = fully opaque)
+                data[idx]     = palLut[p];
+                data[idx + 1] = palLut[p + 1];
+                data[idx + 2] = palLut[p + 2];
+                data[idx + 3] = 255;
             }
             
             ctx.putImageData(imageData, 0, 0);
             console.log('[JS] Canvas updated successfully');
         };
         
-        // Initialize EGA palette - use the same calculation as the original VGA driver
-        // VGA writes 6-bit values (0-63) to palette registers, which need to be scaled to 8-bit (0-255)
-        // Scale factor: 255/63 ≈ 4.048, but we use 4 for exact match with QEMU
-        // Ensure palette array exists
-        if (!Module.ega_palette || Module.ega_palette.length === 0) {
-            Module.ega_palette = [];
-        }
-        
-        for (var i = 0; i < 256; i++) {
-            var r6 = 0, g6 = 0, b6 = 0; // 6-bit values (0-63)
-            var r = 0, g = 0, b = 0;     // 8-bit values (0-255)
-            switch (Math.floor(i / 64)) {
-                case 0:
-                    r6 = (i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0);
-                    g6 = (i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0);
-                    b6 = (i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0);
-                    // Scale 6-bit to 8-bit: multiply by 4
-                    r = r6 * 4;
-                    g = g6 * 4;
-                    b = b6 * 4;
-                    break;
-                case 1:
-                    r6 = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) >> 3;
-                    g6 = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) >> 3;
-                    b6 = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) >> 3;
-                    r = r6 * 4;
-                    g = g6 * 4;
-                    b = b6 * 4;
-                    break;
-                case 2:
-                    r6 = ((i & 0x20 ? 0x15 : 0) | (i & 0x04 ? 0x2a : 0)) << 3;
-                    g6 = ((i & 0x10 ? 0x15 : 0) | (i & 0x02 ? 0x2a : 0)) << 3;
-                    b6 = ((i & 0x08 ? 0x15 : 0) | (i & 0x01 ? 0x2a : 0)) << 3;
-                    // Clamp to 63 (6-bit max) before scaling
-                    if (r6 > 63) r6 = 63;
-                    if (g6 > 63) g6 = 63;
-                    if (b6 > 63) b6 = 63;
-                    r = r6 * 4;
-                    g = g6 * 4;
-                    b = b6 * 4;
-                    break;
-                default:
-                    r = g = b = 0;
-                    break;
-            }
-            Module.ega_palette[i] = [r, g, b];
-        }
-        
-        // Debug: verify color 0 is black
-        console.log('[JS] EGA palette initialized. Color 0 (black):', Module.ega_palette[0]);
-        if (Module.ega_palette[0][0] !== 0 || Module.ega_palette[0][1] !== 0 || Module.ega_palette[0][2] !== 0) {
-            console.error('[JS] ERROR: Color 0 is not black!', Module.ega_palette[0]);
-        }
+        // Use the canonical osakaOS palette from initializeEGAPalette()
+        // defined above (the table is the same `defaultPalette[]` used
+        // by OFS_File_To_Image.cc and the kernel's vga.h). The previous
+        // bit-math EGA palette here was overwriting that with the wrong
+        // colours every page load.
+        initializeEGAPalette();
         
         // Iframe app helper functions - store in window for re-attachment
         window.setupIframeAppFunction = function(urlPtr, iframeId, widgetX, widgetY, widgetW, widgetH) {

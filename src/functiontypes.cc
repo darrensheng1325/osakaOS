@@ -5,7 +5,11 @@ using namespace os::common;
 using namespace os::math;
 using namespace os::filesystem;
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
+#endif
 uint8_t* memset(uint8_t*, int, size_t);
 
 

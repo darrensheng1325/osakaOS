@@ -275,13 +275,13 @@ void RaycastSpace::ComputeSpace(GraphicsContext* gc, char keylog[16], uint8_t lo
 
 		int vMoveScreen = (int)(vMove / transformY);
 		
-		int spriteHeight = abs((int)(h / transformY)) / vDiv;
+		int spriteHeight = os::math::abs((int)(h / transformY)) / vDiv;
 		int drawStartY = -spriteHeight / 2 + h / 2 + vMoveScreen;
 		if (drawStartY < 0) { drawStartY = 0; }
 		int drawEndY = spriteHeight / 2 + h / 2 + vMoveScreen;
 		if (drawEndY >= h) { drawEndY = h - 1; }
 
-		int spriteWidth = abs((int)(h / transformY)) / uDiv;
+		int spriteWidth = os::math::abs((int)(h / transformY)) / uDiv;
 		int drawStartX = -spriteWidth / 2 + spriteScreenX;
 		if (drawStartX < 0) { drawStartX = 0; }
 		int drawEndX = spriteWidth / 2 + spriteScreenX;

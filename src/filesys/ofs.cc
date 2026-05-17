@@ -6,7 +6,11 @@ using namespace os::drivers;
 using namespace os::filesystem;
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
+#endif
 void sleep(uint32_t);
 uint8_t* memset(uint8_t*, int, size_t);
 

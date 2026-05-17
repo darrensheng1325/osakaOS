@@ -6,9 +6,11 @@ using namespace os::drivers;
 using namespace os::hardwarecommunication;
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
-
-
+#endif
 PIT::PIT(InterruptManager* manager) 
 
 : InterruptHandler(0x00, manager),

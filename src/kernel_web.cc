@@ -17,15 +17,17 @@ static uint8_t cursorX = 0;
 static uint8_t cursorY = 0;
 
 extern "C" {
-    // Text mode rendering functions
-    EMSCRIPTEN_KEEPALIVE void putcharTUI(unsigned char ch, unsigned char forecolor, 
+    // putcharTUI — callers declare this `extern "C"` under
+    // __EMSCRIPTEN__ so this single C-linkage definition serves
+    // both the JavaScript bindings (`_putcharTUI`) and internal
+    // call sites in cli.cc / mode/*.cc / etc.
+    EMSCRIPTEN_KEEPALIVE void putcharTUI(unsigned char ch, unsigned char forecolor,
             unsigned char backcolor, uint8_t x, uint8_t y) {
         if (x >= 80 || y >= 25) return;
-        
+
         uint16_t attrib = (backcolor << 4) | (forecolor & 0x0f);
         textBuffer[80 * y + x] = ch | (attrib << 8);
-        
-        // Update canvas via JavaScript function
+
         EM_ASM_INT({
             if (Module.putCharTUI) {
                 Module.putCharTUI($0, $1, $2, $3, $4);
@@ -33,7 +35,7 @@ extern "C" {
             return 0;
         }, x, y, ch, forecolor, backcolor);
     }
-    
+
     // Main printf function implementation (shared by C and C++ versions)
     void printf_impl(char* strChr) {
         if (!strChr) {
@@ -60,11 +62,18 @@ extern "C" {
         // The JavaScript code above handles the string reading and rendering safely.
     }
     
-    // Export C version of printf for JavaScript
+    // C-linkage `printf` symbol, exported to JS as `_printf`.
     EMSCRIPTEN_KEEPALIVE void printf(char* strChr) {
         printf_impl(strChr);
     }
+
+    // Real implementation lives in kernel.cc where the
+    // CLIKeyboardEventHandler / CommandLine types are in scope.
+    // Declared here so the kernel_web translation unit doesn't try
+    // to define a conflicting stub.
+    EMSCRIPTEN_KEEPALIVE void executeCLICommand(char* cmd);
 }
+
 
 // C++ code should declare printf as extern "C" to use the C version above
 // We provide C++ versions of printfLine and printfHex

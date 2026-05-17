@@ -6,8 +6,11 @@ using namespace os::hardwarecommunication;
 
 
 void sleep(uint32_t);
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
-
+#endif
 AC97::AC97(PeripheralComponentInterconnectDeviceDescriptor* dev,
 		InterruptManager* interrupts, uint32_t nabm_offset) 
 	: Driver(),

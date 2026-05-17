@@ -3,6 +3,9 @@
 
 #include <common/types.h>
 #include <stddef.h>
+#ifdef __EMSCRIPTEN__
+#include <new>
+#endif
 
 
 

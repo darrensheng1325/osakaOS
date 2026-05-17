@@ -65,7 +65,11 @@ void KeyboardDriver::Activate() {
 
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
+#endif
 void printfHex(uint8_t);
 
 

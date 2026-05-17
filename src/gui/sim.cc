@@ -362,7 +362,7 @@ void Simulator::OnMouseDown(int32_t newMouseX, int32_t newMouseY, uint8_t button
 
 					backwardsX = mouseX > newMouseX;
 					backwardsY = mouseY > newMouseY;
-					direction = abs(mouseX - newMouseX) > abs(mouseY - newMouseY);
+					direction = os::math::abs(mouseX - newMouseX) > os::math::abs(mouseY - newMouseY);
 					this->mouseX = newMouseX;
 					this->mouseY = newMouseY;
 				}

@@ -1,16 +1,28 @@
 # Emscripten Makefile for osakaOS
+#
+# Configure the DNS server the in-browser stack talks to via these vars:
+#   DNS_SERVER_IP    - dotted-quad IPv4 address (default 127.0.0.1)
+#   DNS_SERVER_PORT  - TCP port for DoH endpoint (default 8053)
+# Example: make -f Makefile.emscripten DNS_SERVER_IP=10.0.2.2
 
 EMCC = emcc
-EMCCFLAGS = -Iinclude -s WASM=0 -s ALLOW_MEMORY_GROWTH=1 \
+
+DNS_SERVER_IP   ?= 127.0.0.1
+DNS_SERVER_PORT ?= 8053
+
+DNS_DEFINES = -DDNS_SERVER_IP_STR='"$(DNS_SERVER_IP)"' -DDNS_SERVER_PORT=$(DNS_SERVER_PORT)
+
+EMCCFLAGS = -Iinclude $(DNS_DEFINES) -s ALLOW_MEMORY_GROWTH=1 \
 	-s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","callMain"]' \
-	-s EXPORTED_FUNCTIONS='["_main","_malloc","_free","_kernelMain","_printf","_putcharTUI","_shouldContinueCLILoop","_setCLILoopActive","_shouldContinueGUILoop","_setGUILoopActive","_web_yield","_handleMouseDown","_handleMouseUp","_handleMouseMove","_handleKeyDown","_handleKeyUp","_setKeyboardModifiers"]' \
+	-s EXPORTED_FUNCTIONS='["_main","_malloc","_free","_kernelMain","_printf","_putcharTUI","_shouldContinueCLILoop","_setCLILoopActive","_shouldContinueGUILoop","_setGUILoopActive","_web_yield","_handleMouseDown","_handleMouseUp","_handleMouseMove","_handleKeyDown","_handleKeyUp","_setKeyboardModifiers","_dnsResolveCallback","_executeCLICommand","_web_toggle_gui_mode","_web_leave_gui_mode","_httpFetchAsync","_httpFetchCallback","_httpFetchFail"]' \
 	-s INITIAL_MEMORY=67108864 \
-	-s STACK_SIZE=524288 \
+	-s STACK_SIZE=8388608 \
 	-s USE_WEBGL2=0 \
 	-s NO_EXIT_RUNTIME=1 \
 	-s ASYNCIFY=1 \
 	-s ASYNCIFY_STACK_SIZE=65536 \
-	-s SINGLE_FILE=0 \
+	-s SINGLE_FILE=1 \
+	-s WASM=1 \
 	-g3 \
 	--no-entry
 
@@ -34,11 +46,17 @@ SOURCES = src/kernel.cc \
 	  src/net/arp.cc \
 	  src/net/ipv4.cc \
 	  src/net/icmp.cc \
+	  src/net/udp.cc \
+	  src/net/tcp.cc \
 	  src/filesys/ofs.cc \
 	  src/cli.cc \
 	  src/app.cc \
 	  src/list.cc \
+	  src/tree.cc \
+	  src/string.cc \
+	  src/functiontypes.cc \
 	  src/app/paint.cc \
+	  src/app/browser.cc \
 	  src/app/file_edit.cc \
 	  src/app/file_browse.cc \
 	  src/app/iframe.cc \
@@ -52,17 +70,20 @@ SOURCES = src/kernel.cc \
 	  src/drivers/vga_web.cc \
 	  src/drivers/keyboard_web.cc \
 	  src/drivers/mouse_web.cc \
-	  src/hardwarecommunication/port_stub.cc \
+	  src/hardwarecommunication/port.cc \
 	  src/hardwarecommunication/interrupts_web.cc \
-	  src/hardwarecommunication/pci_stub.cc \
+	  src/hardwarecommunication/pci.cc \
 	  src/drivers/ata_stub.cc \
 	  src/drivers/amd_am79c973_stub.cc \
+	  src/drivers/ac97_stub.cc \
 	  src/drivers/pit_web.cc \
 	  src/drivers/cmos_stub.cc \
 	  src/drivers/speaker_web.cc \
 	  src/kernel_web.cc \
 	  src/kernel_web_entry.cc \
-	  src/kernel_web_loop.cc
+	  src/kernel_web_loop.cc \
+	  src/kernel_web_dns.cc \
+	  src/kernel_web_http.cc
 
 OBJECTS = $(SOURCES:.cc=.o)
 
@@ -78,4 +99,3 @@ clean:
 	rm -f $(OBJECTS) osakaOS.js osakaOS.wasm
 
 .PHONY: all clean
-

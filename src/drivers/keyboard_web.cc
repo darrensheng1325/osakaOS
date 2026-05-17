@@ -1,8 +1,19 @@
 #include <drivers/keyboard.h>
 #include <emscripten.h>
 #include <emscripten/html5.h>
-#include <string.h>
 #include <stdint.h>
+
+// Local C-string helpers so we don't collide with the project's
+// custom <string.h> (which lives in include/string.h).
+static int kweb_strcmp(const char* a, const char* b) {
+    while (*a && *a == *b) { a++; b++; }
+    return (unsigned char)*a - (unsigned char)*b;
+}
+static unsigned kweb_strlen(const char* s) {
+    unsigned n = 0; while (s && s[n]) n++; return n;
+}
+#define strcmp kweb_strcmp
+#define strlen kweb_strlen
 
 using namespace os::common;
 using namespace os::drivers;
@@ -133,11 +144,25 @@ extern "C" {
             var ctrl = e.ctrlKey;
             var alt = e.altKey;
             var caps = e.getModifierState('CapsLock');
-            
+
+            // Backtick / backquote: while in CLI mode it enters
+            // the GUI desktop; while in GUI mode it forwards 0x5b
+            // to the desktop so it toggles the osaka simulation
+            // view. Escape leaves GUI back to the CLI text canvas.
+            // Use e.code so the binding survives non-US layouts.
+            if (e.code === 'Backquote' && typeof Module._web_toggle_gui_mode === 'function') {
+                Module._web_toggle_gui_mode();
+                return;
+            }
+            if (e.code === 'Escape' && typeof Module._web_leave_gui_mode === 'function') {
+                Module._web_leave_gui_mode();
+                return;
+            }
+
             // Set modifier states
-            Module.ccall('setKeyboardModifiers', null, ['number', 'number', 'number', 'number'], 
+            Module.ccall('setKeyboardModifiers', null, ['number', 'number', 'number', 'number'],
                 [shift ? 1 : 0, ctrl ? 1 : 0, alt ? 1 : 0, caps ? 1 : 0]);
-            
+
             // Convert key to character
             var char = key;
             if (key.length === 1) {
@@ -177,13 +202,20 @@ extern "C" {
             } else if (key === 'ArrowRight') {
                 char = '\xff';
             } else if (key === 'Backquote' || key === '`' || key === '~') {
-                // Backquote key - map to Windows key (0x5b)
-                // Send a special character that will be recognized
-                char = '\x5b'; // Use 0x5b directly as character code
+                // Backquote toggles between the CLI handler (text canvas)
+                // and the desktop handler (graphics canvas) — mirrors the
+                // bare-metal Cmd/Win key behaviour. We dispatch the
+                // toggle directly instead of feeding 0x5b into a handler
+                // that doesn't know how to swap canvases.
+                if (typeof Module._web_toggle_gui_mode === 'function') {
+                    Module._web_toggle_gui_mode();
+                    return;
+                }
+                char = '\x5b';
             } else {
                 return; // Unknown key
             }
-            
+
             // Call handler
             Module.ccall('handleKeyDown', null, ['number'], [char.charCodeAt(0)]);
         });

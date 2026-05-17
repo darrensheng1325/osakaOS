@@ -6,7 +6,11 @@ using namespace os::drivers;
 
 
 void TUI(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, bool);
+#ifdef __EMSCRIPTEN__
+extern "C" void putcharTUI(unsigned char, unsigned char, unsigned char, uint8_t, uint8_t);
+#else
 void putcharTUI(unsigned char, unsigned char, unsigned char, uint8_t, uint8_t);
+#endif
 void printfTUI(char*, uint8_t, uint8_t, uint8_t, uint8_t);
 
 void sleep(uint32_t);

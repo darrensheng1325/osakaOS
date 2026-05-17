@@ -45,7 +45,7 @@ Settings::~Settings() {
 
 void Settings::ComputeAppState(GraphicsContext* gc, CompositeWidget* widget) {
 	if (!init) {
-		widget->Menu = false;
+		widget->MenuOpen = false;
 		init = true;
 	}
 	

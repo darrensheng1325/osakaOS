@@ -5,9 +5,11 @@ using namespace os::drivers;
 using namespace os::hardwarecommunication;
 
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
-
-
+#endif
 MouseEventHandler::MouseEventHandler() {
 }
 

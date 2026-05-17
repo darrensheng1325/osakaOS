@@ -5,7 +5,11 @@ using namespace os::common;
 using namespace os::drivers;
 using namespace os::hardwarecommunication;
 
+#ifdef __EMSCRIPTEN__
+extern "C" void printf(char*);
+#else
 void printf(char*);
+#endif
 void printfHex(uint8_t);
 
 RawDataHandler::RawDataHandler(amd_am79c973* backend) {

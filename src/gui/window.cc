@@ -43,12 +43,24 @@ FileSystem* filesystem)
 	this->winColor = W0041FF;
 
 	//init buttons
-	this->buttons = (List*)(filesystem->memoryManager->malloc(sizeof(List))); 
+	this->buttons = (List*)(filesystem->memoryManager->malloc(sizeof(List)));
 	new (buttons) List(filesystem->memoryManager);
 
 
+	// Widget's `buf` defaults to nullptr; the upstream code below
+	// writes gfxBufferSize bytes to it. On bare metal page 0 is
+	// silently absorbed so the original missing allocation was
+	// harmless, but under wasm it walks straight over the stack
+	// cookie at address 4 and aborts. Allocate the window's
+	// backbuffer here so the loop has a real target.
+	if (this->buf == nullptr) {
+		this->buf = (common::uint8_t*)filesystem->memoryManager->malloc(Widget::gc->gfxBufferSize);
+	}
+
 	//fill buffer with some color
-	for (int i = 0; i < Widget::gc->gfxBufferSize; i++) { this->buf[i] = color; }
+	if (this->buf != nullptr) {
+		for (int i = 0; i < Widget::gc->gfxBufferSize; i++) { this->buf[i] = color; }
+	}
 
 	//this->Blue = true;
 	//this->Pixelize = true;

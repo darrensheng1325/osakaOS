@@ -5,7 +5,11 @@ using namespace os::common;
 using namespace os::math;
 
 void printf(char* str);
+#ifdef __EMSCRIPTEN__
+extern "C" void putcharTUI(unsigned char, unsigned char, unsigned char, uint8_t, uint8_t);
+#else
 void putcharTUI(unsigned char, unsigned char, unsigned char, uint8_t, uint8_t);
+#endif
 void printfLine(const char* str, uint8_t line);
 
 
