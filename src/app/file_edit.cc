@@ -1,14 +1,5 @@
 #include <app/file_edit.h>
-#include <new>
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-extern "C" void printf(char*);
-#else
-void printf(char*);
-#endif
 
-// Forward declarations
-bool strcmp(char* str1, char* str2);
 
 using namespace os;
 using namespace os::gui;
@@ -16,16 +7,18 @@ using namespace os::common;
 using namespace os::filesystem;
 
 
-Journal::Journal() {
+uint8_t* memset(uint8_t*, int, size_t);
+uint16_t hash(char* str);
 
-	this->appType = 3;
+Journal::Journal(MemoryManager* mm) {
+
+	this->appType = APP_TYPE_JOURNAL;
+	this->mm = mm;
+
+	this->degreePoints = (List*)this->mm->malloc(sizeof(List));
 
 	//init block
-	for (uint16_t i = 0; i < OFS_BLOCK_SIZE; i++) {
-	
-		this->LBA[i] = 0x00;
-		this->LBA2[i] = 0x00;
-	}
+	memset(this->LBA, 0x00, OFS_BLOCK_SIZE);
 }
 
 Journal::~Journal() {
@@ -37,137 +30,119 @@ void Journal::ComputeAppState(GraphicsContext* gc, CompositeWidget* widget) {
 	if (!init) {
 	
 		this->DrawTheme(widget);
-		// Enable menu to show tabs
-		widget->Menu = true;
 		init = true;
 	}
-	
-	// Always draw tabs (they're always visible, not toggleable)
-	if (widget->Menu) {
-		this->DrawAppMenu(gc, widget);
-	}
-	
 	App::ComputeAppState(gc, widget);
+}
+
+
+void Journal::DrawAppMenu(GraphicsContext* gc, CompositeWidget* widget) {
+
+	gc->DrawRectangle(widget->x+widget->w-51, widget->y+24, 48, 17, W202041);
+	gc->DrawRectangle(widget->x+widget->w-50, widget->y+25, 46, 15, W394571);
+	gc->FillRectangle(widget->x+widget->w-49, widget->y+26, 44, 13, W515171);
+	gc->PutText("Analyze", widget->x+widget->w-48, widget->y+31, W000000);
+	gc->PutText("Analyze", widget->x+widget->w-49, widget->y+30, WFFFFFF);
+	
+	if (this->degreePoints->numOfNodes > 0) {
+	
+		gc->MakeDark(2, widget->x+5, widget->y+24, widget->w-55, widget->h-29);
+		uint16_t pixelsBetweenPoints = ((widget->w-50) / this->degreePoints->numOfNodes);
+		uint32_t lastNum = *((uint32_t*)(this->degreePoints->Read(0)));
+
+		if (pixelsBetweenPoints > 0) {
+		
+			for (int i = 1; i < this->degreePoints->numOfNodes; i++) {
+		
+				uint32_t num = *((uint32_t*)(this->degreePoints->Read(i)));
+				gc->DrawLine(widget->x+((i-1)*pixelsBetweenPoints)+5, widget->y+widget->h-(5+lastNum), 
+					     widget->x+(i*pixelsBetweenPoints)+5,     widget->y+widget->h-(5+num), W00FF41);
+				lastNum = num;
+			}
+		}
+		
+		gc->PutText("CMD CNT: ", widget->x+8, widget->y+30, W000000);
+		gc->PutText("CMD CNT: ", widget->x+7, widget->y+29, WFFFFFF);
+		gc->PutText(int2str(this->degreePoints->numOfNodes), widget->x+61, widget->y+30, W000000);
+		gc->PutText(int2str(this->degreePoints->numOfNodes), widget->x+60, widget->y+29, WFFFFFF);
+	}
 }
 
 
 void Journal::DrawTheme(CompositeWidget* widget) {
 
-	//blue lines (start below tabs)
-	for (uint8_t y = font_height-1 + 12; y < 200; y += font_height) {
+	//blue lines
+	for (uint16_t y = FONT_HEIGHT-1; y < widget->gc->gfxHeight; y += FONT_HEIGHT) {
 		
-		widget->DrawLine(widget->x+0, widget->y+y, widget->x+320, widget->y+y, 0x2b);
+		widget->DrawLine(widget->x+0, widget->y+y, widget->x+widget->gc->gfxWidth, widget->y+y, W829EFF);
 	}
-	
 	//red line
-	widget->DrawLine(widget->x+0, widget->y+0, widget->x+0, widget->y+200, 0x3c);
-	
-	// Draw separator line below tabs
-	uint8_t offsetY = 10 * !widget->Fullscreen;
-	widget->DrawLine(widget->x+0, widget->y+offsetY+12, widget->x+320, widget->y+offsetY+12, 0x2b);
+	widget->DrawLine(widget->x+0, widget->y+0, widget->x+0, widget->y+widget->gc->gfxHeight, WFF5555);
 }
-
-
-
-void Journal::DrawAppMenu(GraphicsContext* gc, CompositeWidget* widget) {
-	// Draw tabs/buttons at the top of the journal content area for save/open
-	// These work even when browser overrides keyboard shortcuts
-	uint16_t offsetx = 1 * !widget->Fullscreen;
-	uint8_t offsety = 10 * !widget->Fullscreen;
-	
-	int32_t tabX = widget->x + offsetx + 1;
-	int32_t tabY = widget->y + offsety; // Start of content area
-	
-	// Save button (40px wide, 12px tall)
-	// gc->FillRectangle(tabX, tabY, 40, 12, 0x07); // Background (x, y, width, height)
-	// gc->DrawRectangle(tabX, tabY, 40, 12, 0x3f); // Border (x, y, width, height)
-	// gc->PutText("Save", tabX + 2, tabY + 2, 0x3f);
-	
-	// Open button (40px wide, 12px tall)
-	// gc->FillRectangle(tabX + 42, tabY, 40, 12, 0x07); // Background (x, y, width, height)
-	// gc->DrawRectangle(tabX + 42, tabY, 40, 12, 0x3f); // Border (x, y, width, height)
-	// gc->PutText("Open", tabX + 44, tabY + 2, 0x3f);
-}
-
-
 
 
 void Journal::SaveOutput(char* fileName, CompositeWidget* widget, FileSystem* filesystem) {
 
-	// Validate filename is not empty
-	if (fileName == nullptr || fileName[0] == '\0') {
-		printf("Cannot save: filename is empty\n");
-		return;
-	}
+	if (filesystem->FileIf(filesystem->GetFileSector(fileName))) {
 
-	// Check if file exists on disk
-	uint32_t fileSector = filesystem->GetFileSector(fileName);
-	bool fileExistsOnDisk = filesystem->FileIf(fileSector);
-	
-	// Check if file exists in in-memory table
-	bool fileExistsInTable = false;
-	for (int i = 0; i < filesystem->table->fileCount; i++) {
-		File* file = (File*)(filesystem->table->files->Read(i));
-		if (file && strcmp(fileName, file->Name)) {
-			fileExistsInTable = true;
-			break;
-		}
-	}
-	
-	if (fileExistsOnDisk) {
-		// File exists on disk, write to it
-		if (!filesystem->WriteLBA(fileName, LBA, 0)) {
-			printf("Failed to write to existing file\n");
-			return;
-		}
+		for (int i = 0; i < this->numOfBlocks; i++) {
 		
-		// If file exists on disk but not in table, add it to table
-		if (!fileExistsInTable) {
-			File* newFile = (File*)(filesystem->memoryManager->malloc(sizeof(File)));
-			new (newFile) File(fileSector, OFS_BLOCK_SIZE, fileName);
-			filesystem->table->files->Push(newFile);
-			filesystem->table->fileCount++;
+			filesystem->WriteLBA(fileName, this->fileBuffer+(i*OFS_BLOCK_SIZE), i);
 		}
 	} else {
-		// File doesn't exist, create new one
-		if (!filesystem->NewFile(fileName, LBA, OFS_BLOCK_SIZE)) {
-			printf("Failed to create new file\n");
-			return;
+		filesystem->NewFile(fileName, this->fileBuffer, OFS_BLOCK_SIZE);
+		
+		for (int i = 1; i < this->numOfBlocks; i++) {
+		
+			filesystem->WriteLBA(fileName, this->fileBuffer+(i*OFS_BLOCK_SIZE), i);
 		}
 	}
-	
-	// Note: IndexedDB writes are asynchronous but transactional.
-	// They will complete in the background and persist correctly.
-	// We don't need to wait for them here as Emscripten doesn't allow
-	// nested async operations (emscripten_sleep would conflict with IndexedDB).
-	
-	printf("File saved successfully\n");
 }
 
 
 void Journal::ReadInput(char* fileName, CompositeWidget* widget, FileSystem* filesystem) {
+	
+	//free current memory	
+	if (this->fileBuffer != nullptr) {
+		
+		filesystem->memoryManager->free(this->fileBuffer);
+	}
 
 	if (filesystem->FileIf(filesystem->GetFileSector(fileName))) {
 	
-		filesystem->ReadLBA(fileName, LBA, 0);
-	} else {
-		//fill in with empty zeros
-		for (uint16_t i = 0; i < OFS_BLOCK_SIZE; i++) { LBA[i] = 0x00; }
+		uint32_t size = filesystem->GetFileSize(fileName);
+		this->numOfBlocks = size/OFS_BLOCK_SIZE;
 		
+		this->fileBuffer = (uint8_t*)filesystem->memoryManager->malloc(sizeof(uint8_t)*size);
+		
+		//save data to buffer
+		for (int i = 0; i < this->numOfBlocks; i++) {
+		
+			filesystem->ReadLBA(fileName, this->LBA, i);
+
+			for (int j = 0; j < OFS_BLOCK_SIZE; j++) {
+			
+				this->fileBuffer[j+(i*OFS_BLOCK_SIZE)] = this->LBA[j];
+			}
+		}
+	} else {
+		this->fileBuffer = (uint8_t*)filesystem->memoryManager->malloc(sizeof(uint8_t)*OFS_BLOCK_SIZE);
+		memset(this->fileBuffer, 0x00, OFS_BLOCK_SIZE);
+
 		//write little error message
 		const char* error = "file not found";
-		for (uint8_t i = 0; error[i] != '\0'; i++) { LBA[i] = error[i]; }
+		for (uint8_t i = 0; error[i] != '\0'; i++) { this->fileBuffer[i] = error[i]; }
 	}
 	widget->Print("\v");
 	this->DrawTheme(widget);
-	// Tabs will be redrawn by ComputeAppState on next frame
-	widget->textColor = 0x40;
-	for (index = 0; LBA[index] != 0x00; index++) {
+	widget->textColor = W000000;
+	
+	for (index = 0; this->fileBuffer[index] != 0x00 && index < this->numOfBlocks*OFS_BLOCK_SIZE; index++) {
 		
-		widget->PutChar((char)(LBA[index]));
+		widget->PutChar((char)(this->fileBuffer[index]));
 	}
 	widget->PutChar('\v');
-	widget->textColor = 0x3f;
+	widget->textColor = WFFFFFF;
 }
 
 
@@ -175,16 +150,34 @@ void Journal::ReadInput(char* fileName, CompositeWidget* widget, FileSystem* fil
 void Journal::OnKeyDown(char ch, CompositeWidget* widget) {
 	
 	widget->Print("\v");
-	this->DrawTheme(widget);
-	// Tabs will be redrawn by ComputeAppState on next frame
-	widget->textColor = 0x40;
+	widget->textColor = W000000;
 
+	//increase buffer size
+	if (index >= this->numOfBlocks*OFS_BLOCK_SIZE) {
 
-	//change to next block
-	//looks like thats not finished lol
-	if (index >= OFS_BLOCK_SIZE) {
-	
-		return;
+		//increase size by 1 block and switch pointers
+		
+		uint8_t* oldBuf = this->fileBuffer;
+		this->fileBuffer = (uint8_t*)this->mm->malloc((this->numOfBlocks+1)*OFS_BLOCK_SIZE);
+
+		for (int i = 0; i < this->numOfBlocks*OFS_BLOCK_SIZE; i++) {
+		
+			this->fileBuffer[i] = oldBuf[i];
+		}
+		
+		for (int i = 0; i < OFS_BLOCK_SIZE; i++) {
+		
+			this->fileBuffer[(this->numOfBlocks*OFS_BLOCK_SIZE)+i] = 0x00;
+		}
+		
+		
+		this->numOfBlocks++;
+		
+		if (oldBuf != nullptr) {
+		
+			this->mm->free(oldBuf);
+		}
+		//return;
 	}
 
 
@@ -200,12 +193,12 @@ void Journal::OnKeyDown(char ch, CompositeWidget* widget) {
 
 					for (i = cursor-1; i < index; i++) {
 				
-						LBA[i] = LBA[i+1];
+						fileBuffer[i] = fileBuffer[i+1];
 					}
 				}
 				index--;
 				cursor--;
-				LBA[index] = 0x00;
+				fileBuffer[index] = 0x00;
 			}
 			break;
 		//left
@@ -214,12 +207,12 @@ void Journal::OnKeyDown(char ch, CompositeWidget* widget) {
 			break;
 		//up
 		case '\xfd':
-			while(cursor > 0 && LBA[cursor] != '\n') { cursor--; }
+			while(cursor > 0 && fileBuffer[cursor] != '\n') { cursor--; }
 			cursor -= 1 * (cursor > 0);
 			break;
 		//down
 		case '\xfe':
-			while(cursor < index && LBA[cursor] != '\n') { cursor++; }
+			while(cursor < index && fileBuffer[cursor] != '\n') { cursor++; }
 			cursor += 1 * (cursor < index);
 			break;
 		//right
@@ -229,14 +222,14 @@ void Journal::OnKeyDown(char ch, CompositeWidget* widget) {
 		default:
 			if (cursor < index) {
 
-				LBA[index+1] = LBA[index];
+				fileBuffer[index+1] = fileBuffer[index];
 				
 				for (i = index; i > cursor; i--) {
 				
-					LBA[i] = LBA[i-1];
+					fileBuffer[i] = fileBuffer[i-1];
 				}
 			}
-			LBA[cursor] = (uint8_t)(ch);
+			fileBuffer[cursor] = (uint8_t)(ch);
 			index++;
 			cursor++;
 			break;
@@ -250,7 +243,7 @@ void Journal::OnKeyDown(char ch, CompositeWidget* widget) {
 
 	for (j = 0; j < index; j++) {
 	
-		if (LBA[j] == '\n') {
+		if (fileBuffer[j] == '\n') {
 		
 			prevNewLine = j;
 			if (cursorPassed) { break; }
@@ -264,22 +257,64 @@ void Journal::OnKeyDown(char ch, CompositeWidget* widget) {
 	uint16_t printLimit = index;
 	
 
+	char word[256];
+	uint16_t wordIndex = 0;
+	bool quotes = false;
+	memset((uint8_t*)word, '\0', 256);
+
 	//print text to screen	
 	for (i = 0; i < printLimit; i++) {
 	
 		if (i == cursor) {
 	
 			widget->PutChar('\v');
-			if (LBA[i] == '\n') { widget->PutChar('\n'); }
+			if (fileBuffer[i] == '\n') { widget->PutChar('\n'); }
 		} else {
-			if (LBA[i] == '\v') {
+			if (fileBuffer[i] == '\v') {
 			
 				widget->PutChar(' ');
 				widget->PutChar(' ');
 				widget->PutChar(' ');
 				widget->PutChar(' ');
 			} else {
-				widget->PutChar((char)(LBA[i]));
+				if (wordIndex < 256) {
+
+					if ((char)fileBuffer[i] == '\"') {
+					
+						quotes ^= 1;
+					}
+					word[wordIndex] = (char)fileBuffer[i];
+					wordIndex++;
+				}
+
+				if ((((char)fileBuffer[i] == ' ' && !quotes) || (char)fileBuffer[i] == '\n') && wordIndex > 0) {
+
+					word[wordIndex-1] = '\0';
+						
+					for (int j = 0; j < strlen(word); j++) { widget->PutChar('\b'); }
+						
+					if (CommandLine::cmdTable[hash(word)] != nullptr) { 	   widget->textColor = W0000FF;
+												   widget->Print(word, TEXT_BOLD);
+					
+					} else if (word[0] == '\"' && word[wordIndex-2] == '\"') { widget->textColor = WFF00BE;
+												   widget->Print(word, TEXT_ITALIC);
+					
+					} else if (word[0] >= '0' && word[0] <= '9') {		   widget->textColor = W00FF00;
+												   widget->Print(word, TEXT_BOLD);
+					
+					} else if (word[0] == '$') {				   widget->textColor = W00FFFF;
+												   widget->Print(word);
+					
+					} else {						   widget->Print(word);
+					}
+					widget->textColor = W000000;
+
+					quotes = false;
+					wordIndex = 0;
+					memset((uint8_t*)word, '\0', 256);
+				}
+
+				widget->PutChar((char)(fileBuffer[i]));
 			}
 		}
 
@@ -288,8 +323,8 @@ void Journal::OnKeyDown(char ch, CompositeWidget* widget) {
 	}
 	if (cursor == index) { widget->PutChar('\v'); }
 
-	
-	widget->textColor = 0x3f;
+	this->DrawTheme(widget);
+	widget->textColor = WFFFFFF;
 }
 
 void Journal::OnKeyUp(char ch, CompositeWidget* widget) {
@@ -298,44 +333,17 @@ void Journal::OnKeyUp(char ch, CompositeWidget* widget) {
 
 
 void Journal::OnMouseDown(int32_t x, int32_t y, uint8_t button, CompositeWidget* widget) {
+	
+	//gc->DrawRectangle(widget->x+widget->w-51, widget->y+24, 48, 17, W202041);
 
-	// Check if clicking on tabs (relative to widget)
-	uint16_t offsetx = 1 * !widget->Fullscreen;
-	uint8_t offsety = 10 * !widget->Fullscreen;
-	
-	// Calculate relative position in content area
-	int32_t relX = x - widget->x - offsetx;
-	int32_t relY = y - widget->y - offsety;
-	
-	// Check if clicking on Save button (x: 1-41, y: 0-12)
-	if (relX >= 1 && relX < 41 && relY >= 0 && relY < 12 && button == 1) {
-		// Open save file dialog
-		Window* win = (Window*)widget;
-		win->FileWindow = true;
-		win->Save = true;
-		// Clear filename buffer
-		for (int i = 0; i < 32; i++) {
-			win->fileName[i] = '\0';
-		}
-		win->fileNameIndex = 0;
-		return;
+	if (x <= widget->x+widget->w-2 && x >= widget->x+widget->w-51 
+		&& y >= widget->y+24 && y <= widget->y+41) 
+	{
+		this->degreePoints->DestroyList();
+		AyumuScriptFindDegree(this->fileBuffer, this->index, this->degreePoints);
+	} else {
+		widget->Dragging = true;
 	}
-	
-	// Check if clicking on Open button (x: 42-82, y: 0-12)
-	if (relX >= 42 && relX < 82 && relY >= 0 && relY < 12 && button == 1) {
-		// Open read file dialog
-		Window* win = (Window*)widget;
-		win->FileWindow = true;
-		win->Save = false;
-		// Clear filename buffer
-		for (int i = 0; i < 32; i++) {
-			win->fileName[i] = '\0';
-		}
-		win->fileNameIndex = 0;
-		return;
-	}
-
-	widget->Dragging = true;
 }
 void Journal::OnMouseUp(int32_t x, int32_t y, uint8_t button, CompositeWidget* widget) {
 }

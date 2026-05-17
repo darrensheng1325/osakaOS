@@ -1,13 +1,10 @@
 #include <cli.h>
 #include <script.h>
-#include <new>
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#endif
 
 
 using namespace os;
 using namespace os::gui;
+using namespace os::net;
 using namespace os::math;
 using namespace os::drivers;
 using namespace os::common;
@@ -16,7 +13,7 @@ using namespace os::hardwarecommunication;
 
 
 //the entire command line of osakaOS is stored here
-void (*CommandLine::cmdTable[65536])(char* str, CommandLine* cli);
+void (*CommandLine::cmdTable[CMD_TABLE_SIZE])(char* str, CommandLine* cli);
 bool CommandLine::WakeupInit = false;
 
 
@@ -25,23 +22,9 @@ uint16_t hash(char* str);
 	
 void TUI(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, bool);
 void putcharTUI(uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
-uint16_t setTextColor(bool set, uint16_t color = 0x07);
-#ifdef __EMSCRIPTEN__
-extern "C" void printf(char*);
-#else
+uint16_t setTextColor(bool set, uint16_t color = WAAAAAA);
 void printf(char*);
-#endif
 void printOsaka(uint8_t, bool);
-
-uint16_t strlen(char* args);
-bool strcmp(char* str1, char* str2);
-uint32_t str2int(char* args);
-char* int2str(uint32_t num);
-char* argparse(char*, uint8_t);
-uint8_t argcount(char*);
-
-float str2float(char* str);
-
 
 void makeBeep(uint32_t freq);
 
@@ -56,58 +39,26 @@ uint32_t cmosDetectMemory();
 
 uint32_t FileList(CommandLine* cli);
 
-uint32_t numOrVar(char* args, CommandLine* cli, uint8_t argNum);		
+int32_t numOrVar(char* args, CommandLine* cli, uint8_t argNum);		
+
+uint8_t* memset(uint8_t*, int, size_t);
 
 CommandLine* LoadScriptForTask(bool set, CommandLine* cli = 0);
-CommandLine* LoadMainCLI(bool set, CommandLine* cli = 0);
-bool RequestGUIMode(bool set, bool value = false);
-bool RequestCLIMode(bool set, bool value = false);
 
 
-
-
-
-
-
-
-uint16_t hash(char* str) {
-
-	uint32_t val = 0x811c9dc5;
-	
-	for (int i = 0; str[i] != '\0'; i++) {
-	
-		val ^= str[i];
-		val *= 0x01000193;
-	}
-	val++;
-	
-	return (val >> 16) ^ (val & 0xffff);
-}
 
 
 void say(char* args, CommandLine* cli) {
 
-#ifdef __EMSCRIPTEN__
-	EM_ASM_({
-		console.log('[CLI] say command called with args:', UTF8ToString($0));
-	}, args);
-#endif
-
-	cli->PrintCommand(args);
+	cli->PrintCommand(strOrVar(args, cli, -1));
 	cli->PrintCommand("\n");
-	
-#ifdef __EMSCRIPTEN__
-	EM_ASM_({
-		console.log('[CLI] say command completed');
-	});
-#endif
 }
 
 void print(char* args, CommandLine* cli) {
 
 	uint32_t charNum = numOrVar(args, cli, 0);
 	char* foo = " ";
-	foo[0] = (os::common::int8_t)(charNum);
+	foo[0] = (int8_t)(charNum);
 	
 	if (charNum < cli->lists->numOfNodes) {
 	
@@ -149,7 +100,7 @@ void tasks(char* args, CommandLine* cli) {
 		cli->PrintCommand(int2str(cli->tm->taskPriority[i]));
 		cli->PrintCommand("\n");
 	}
-	cli->returnVal = cli->tm->numTasks;
+	cli->returnVar->typeInt = cli->tm->numTasks;
 }
 
 void kill(char* args, CommandLine* cli) {
@@ -172,7 +123,7 @@ void kill(char* args, CommandLine* cli) {
 	cli->tm->DeleteTask(taskNum);
 
 	//free task from kernel heap
-	cli->DeleteTaskForScript(taskNum);
+	cli->DeleteTaskForScript();
 
 	//let user know
 	cli->PrintCommand("Task ");
@@ -224,7 +175,7 @@ void rmem(char* args, CommandLine* cli) {
 	uint32_t mem = numOrVar(args, cli, 0);
 	uint32_t val = memRead(mem);
 	
-	cli->returnVal = val;
+	cli->returnVar->typeInt = val;
 	
 	cli->PrintCommand("Reading from ");
 	cli->PrintCommand(int2str(mem));	
@@ -243,21 +194,9 @@ void heap(char* args, CommandLine* cli) {
 
 
 //asm
-void startInterrupts(char* args, CommandLine* cli) { 
-#ifndef __EMSCRIPTEN__
-	asm volatile("sti"); 
-#endif
-}
-void stopInterrupts(char* args, CommandLine* cli) { 
-#ifndef __EMSCRIPTEN__
-	asm volatile("cli"); 
-#endif
-}
-void halt(char* args, CommandLine* cli) { 
-#ifndef __EMSCRIPTEN__
-	asm volatile("hlt"); 
-#endif
-}
+void startInterrupts(char* args, CommandLine* cli) { asm volatile("sti"); }
+void stopInterrupts(char* args, CommandLine* cli) { asm volatile("cli"); }
+void halt(char* args, CommandLine* cli) { asm volatile("hlt"); }
 
 
 //assembler for generating executable 
@@ -273,7 +212,7 @@ void assembler(char* args, CommandLine* cli) {
 void PortRead8(char* args, CommandLine* cli) {
 
 	Port8Bit port8(str2int(args));
-	cli->returnVal = port8.Read();
+	cli->returnVar->typeInt = port8.Read();
 }
 void PortWrite8(char* args, CommandLine* cli) {
 
@@ -283,7 +222,7 @@ void PortWrite8(char* args, CommandLine* cli) {
 void PortRead16(char* args, CommandLine* cli) {
 
 	Port16Bit port16(str2int(args));
-	cli->returnVal = port16.Read();
+	cli->returnVar->typeInt = port16.Read();
 }
 void PortWrite16(char* args, CommandLine* cli) {
 
@@ -293,7 +232,7 @@ void PortWrite16(char* args, CommandLine* cli) {
 void PortRead32(char* args, CommandLine* cli) {
 
 	Port32Bit port32(str2int(args));
-	cli->returnVal = port32.Read();
+	cli->returnVar->typeInt = port32.Read();
 }
 void PortWrite32(char* args, CommandLine* cli) {
 
@@ -356,9 +295,6 @@ void rdisk(char* args, CommandLine* cli) {
 	//read data
 	uint8_t data[512];
 	cli->filesystem->ata0m->Read28(sector, data, size, 0);
-	#ifdef __EMSCRIPTEN__
-	data[0] = 1;
-	#endif
 
 	//print and empty data
 	cli->PrintCommand((char*)data);
@@ -392,7 +328,7 @@ void ofs(char* args, CommandLine* cli) {
 	cli->PrintCommand(int2str(cli->filesystem->table->currentOpenSector));
 	cli->PrintCommand("\n");
 	
-	cli->returnVal = cli->filesystem->table->fileCount;
+	cli->returnVar->typeInt = cli->filesystem->table->fileCount;
 }
 
 
@@ -410,38 +346,29 @@ void files(char* args, CommandLine* cli) {
 
 	//list all files
 	//go through each file entry and print
-	// Use the in-memory table instead of GetFileCount to avoid garbage files
-	uint32_t actualFileNum = cli->filesystem->table->fileCount;
-	for (int i = 0; i < actualFileNum; i++) {
+	for (int i = 0; i < fileNum; i++) {
 		
-		// Get file from in-memory table (already validated during initialization)
-		File* file = (File*)(cli->filesystem->table->files->Read(i));
-		if (!file) continue;
-		
-		// Copy file name
-		for (int j = 0; j < 33; j++) {
-			name[j] = file->Name[j];
-		}
-		
-		uint32_t location = file->Location;
+		uint32_t location = cli->filesystem->GetFileName(i, name);
 		bool skip = false;
 
 		//list files with given tag(s)
 		//if none given then print all files
 		if (filterTags) { skip = cli->filesystem->GetTagFile(args, location, &tagNum) != location; }		
+		skip = (cli->filesystem->GetTagFile("sys", location, &tagNum) == location) && !(strcmp("sys", args));
+
 
 		//print information
 		if (!skip) {
 			
 			cli->PrintCommand(int2str(location));
 			cli->PrintCommand("    ");
-			cli->PrintCommand(name, 0x09);
+			cli->PrintCommand(name, W0000FF);
 			cli->PrintCommand("    ");
 	
 			for (int j = 0; j < 8; j++) {
 		
 				cli->filesystem->GetFileTag(name, j, tag);
-				cli->PrintCommand(tag, 0x0a);
+				cli->PrintCommand(tag, W00AA00);
 				cli->PrintCommand(" ");
 			}
 			cli->PrintCommand("\n", previousColor);
@@ -451,7 +378,7 @@ void files(char* args, CommandLine* cli) {
 	//print file count and give
 	//return value of file count
 	char* strNum = int2str(fileCount);
-	cli->returnVal = fileCount;
+	cli->returnVar->typeInt = fileCount;
 
 	cli->PrintCommand("\n");
 	cli->PrintCommand(strNum);
@@ -463,43 +390,16 @@ void files(char* args, CommandLine* cli) {
 
 void catFile(char* args, CommandLine* cli) {
 
-	EM_ASM_({
-		console.log('[CATFILE] Called with args:', UTF8ToString($0));
-	}, args);
-	
-	uint32_t fileSize = cli->filesystem->GetFileSize(args);
-	EM_ASM_({
-		console.log('[CATFILE] GetFileSize returned:', $0);
-	}, fileSize);
-	
-	uint32_t LBAsize = fileSize / OFS_BLOCK_SIZE;
-	EM_ASM_({
-		console.log('[CATFILE] LBAsize calculated:', $0, '(fileSize:', $1, ', OFS_BLOCK_SIZE:', $2, ')');
-	}, LBAsize, fileSize, OFS_BLOCK_SIZE);
-	
+	uint32_t LBAsize = cli->filesystem->GetFileSize(args)/OFS_BLOCK_SIZE;
 	uint8_t data[OFS_BLOCK_SIZE];
 
 	if (LBAsize == 0) {
-		EM_ASM_({
-			console.log('[CATFILE] LBAsize is 0, printing "Nothing here..."');
-		});
+	
 		cli->PrintCommand("Nothing here...");
 	} else {
-		EM_ASM_({
-			console.log('[CATFILE] LBAsize: ', $0, ', starting to read file');
-		}, LBAsize);
 		for (int i = 0; i < LBAsize; i++) {
-			EM_ASM_({
-				console.log('[CATFILE] Reading LBA:', $0);
-			}, i);
-			
-			bool readSuccess = cli->filesystem->ReadLBA(args, data, i);
-			EM_ASM_({
-				console.log('[CATFILE] ReadLBA returned:', $0);
-				if ($0) {
-					console.log('[CATFILE] First 10 bytes of data:', HEAPU8[$1], HEAPU8[$1+1], HEAPU8[$1+2], HEAPU8[$1+3], HEAPU8[$1+4], HEAPU8[$1+5], HEAPU8[$1+6], HEAPU8[$1+7], HEAPU8[$1+8], HEAPU8[$1+9]);
-				}
-			}, readSuccess, (uintptr_t)data);
+	
+			cli->filesystem->ReadLBA(args, data, i);
 	
 			//print data from file
 			for (uint16_t j = 0; j < OFS_BLOCK_SIZE; j++) {
@@ -509,21 +409,15 @@ void catFile(char* args, CommandLine* cli) {
 				cli->PrintCommand(str);
 			}
 		}
-		EM_ASM_({
-			console.log('[CATFILE] Finished reading all LBAs');
-		});
 	}
 	cli->PrintCommand("\n");
-	EM_ASM_({
-		console.log('[CATFILE] Function completed');
-	});
 }
 
 
 void size(char* args, CommandLine* cli) {
 		
 	uint32_t size = cli->filesystem->GetFileSize(args);
-	cli->returnVal = size;
+	cli->returnVar->typeInt = size;
 
 	
 	if (size) {
@@ -547,41 +441,25 @@ void createFile(char* args, CommandLine* cli) {
 	}
 	
 	//get file name
+	//char* fileName = strOrVar(args, cli, 0);
 	int i = 0;
 	char fileName[33];
 	for (i; i < strlen(argparse(args, 0)); i++) { fileName[i] = args[i];}
 	fileName[i] = '\0';
 
-	//get list name
-	int j = 0;
-	char listName[256];
-	for (j; j < strlen(argparse(args, 1)); j++) { listName[j] = args[i+j+1];}
-	listName[j] = '\0';
-	
-	
-	
-	List* dataList = nullptr;
-	uint32_t listIndex = hash(listName) % 1024;
-	
-	//check if list for data exists
-	if (argcount(args) > 1 && cli->varTable[listIndex] < cli->lists->numOfNodes) {
-		
-		dataList = (List*)(cli->lists->Read(cli->varTable[listIndex]));
-	}
+
+	char* dataStr = strOrVar(args, cli, 1);
 
 	//write data from list to file
 	uint8_t data[OFS_BLOCK_SIZE];
-		
+	memset(data, 0x00, OFS_BLOCK_SIZE);
 
-	if (dataList != nullptr) {
+	if (dataStr != nullptr) {
 		
-		for (int i = 0; i < OFS_BLOCK_SIZE; i++) { 
+		for (int i = 0; i < strlen(dataStr) && i < OFS_BLOCK_SIZE; i++) { 
 		
-			if (i < dataList->numOfNodes) { data[i] = (uint8_t)(*((uint32_t*)(dataList->Read(i))));
-			} else { 	   data[i] = 0x00; }
+			data[i] = dataStr[i];
 		}
-	} else {
-		for (int i = 0; i < OFS_BLOCK_SIZE; i++) { data[i] = 0x00; } 
 	}
 	
 
@@ -682,7 +560,19 @@ void encrypt(char* args, CommandLine* cli) {
 	fileName[i] = '\0';
 
 	uint8_t key[16];
-	for (int j = i+1; j < strlen(argparse(args, 1)); j++) { key[j] = (uint8_t)args[i+j+1]; }
+	for (int j = i+1; j < strlen(argparse(args, 1)); j++) { 
+		/*
+		char hashStr[2];
+		hashStr[0] = args[i+j+1];
+		hashStr[1] = args[i+j+2];
+		
+		
+		
+		uint16_t hashVal = hash(hashStr);
+		key[j] = ; 
+		*/
+		key[j] = (uint8_t)args[i+j+1]; 
+	}
 	
 	cli->filesystem->CryptFile(fileName, key, true);
 }
@@ -697,7 +587,7 @@ void decrypt(char* args, CommandLine* cli) {
 	
 	uint8_t key[16];
 	for (int j = i+1; j < strlen(argparse(args, 1)); j++) { key[j] = (uint8_t)args[i+j+1]; }
-	
+		
 	
 	cli->filesystem->CryptFile(fileName, key, false);
 }
@@ -718,222 +608,296 @@ void ip(char* args, CommandLine* cli) {
 		cli->PrintCommand("\n");
 	
 		cli->PrintCommand("IP Address: ");
-		cli->PrintCommand(int2str(cli->network->ip));
+		cli->PrintCommand(ip2str(cli->network->ip));
 		cli->PrintCommand("\n");
 	
 		cli->PrintCommand("GATEWAY: ");
-		cli->PrintCommand(int2str(cli->network->gateway));
+		cli->PrintCommand(ip2str(cli->network->gateway));
 		cli->PrintCommand("\n");
 		
 		cli->PrintCommand("SUBNET: ");
-		cli->PrintCommand(int2str(cli->network->subnet));
+		cli->PrintCommand(ip2str(cli->network->subnet));
 		cli->PrintCommand("\n");
 	}
 }
 
+void arp(char* args, CommandLine* cli) {
+
+	cli->network->arp->BroadcastMACAddress(cli->network->gateway);
+}
 
 void ping(char* args, CommandLine* cli) {
 
-	uint32_t ip = str2int(args);
-	cli->network->icmp->RequestEchoReply(ip);
-	cli->PrintCommand("\n");
-}
+	uint32_t ip = str2ip(args);
+	cli->PrintCommand("Pinging ");
+	cli->PrintCommand(ip2str(ip));
+	cli->PrintCommand("...\n");
 
-
-
-//mode switching commands
-void startGUI(char* args, CommandLine* cli) {
+	if (argcount(args) < 2) {
 	
-#ifdef __EMSCRIPTEN__
-	EM_ASM_({
-		console.log('[CLI] startGUI called, cli->gui =', $0);
-	}, cli->gui ? 1 : 0);
-#endif
+		cli->network->icmp->RequestEchoReply(ip, nullptr, 0);
+	} else {
+		//shift string
+		char* cmp = argparse(args, 0);
+		uint8_t offset = 0;
+
+		for (offset; cmp[offset] != '\0'; offset++) {} offset++;
+		for (int i = 0; args[i] != '\0'; i++) {
 	
-	if (cli->gui) {
-		cli->PrintCommand("Already in GUI mode.\n");
-#ifdef __EMSCRIPTEN__
-		EM_ASM_({
-			console.log('[CLI] Already in GUI mode');
-		});
-#endif
-		return;
+			args[i] = args[i+offset];
+		}
+		cli->network->icmp->RequestEchoReply(ip, (uint8_t*)args, strlen(args));
 	}
-	
-	cli->PrintCommand("Switching to GUI mode...\n");
-	RequestGUIMode(true, true);
-	
-#ifdef __EMSCRIPTEN__
-	EM_ASM_({
-		console.log('[CLI] RequestGUIMode called, flag set to true');
-	});
-#endif
 }
 
-void startCLI(char* args, CommandLine* cli) {
+void control(char* args, CommandLine* cli) {
+
+	cli->network->activateServerCMD ^= 1;
 	
-	if (!cli->gui) {
-		cli->PrintCommand("Already in CLI mode.\n");
-		return;
-	}
-	
-	cli->PrintCommand("Switching to CLI mode...\n");
-	cli->PrintCommand("Note: This will exit GUI mode. Use 'gui' command to return.\n");
-	// Set flag to exit GUI loop
-	RequestCLIMode(true, true);
+	if (cli->network->activateServerCMD) { cli->PrintCommand("Command server mode activated.\n");
+	} else {				cli->PrintCommand("Command server mode deactivated.\n"); }
 }
+
+
+
+
+void web(char* args, CommandLine* cli) {
+		
+	if (strcmp(argparse(args, 0), "start")) {
+
+		if (cli->network->activateServerHTTP == true) {
+		
+			cli->PrintCommand("Web server is already running, relax.\n");
+			return;
+		}
+
+		//web start 80 index
+		uint16_t port = str2int(argparse(args, 1));
+		char* indexFile = argparse(args, 2);
+		cli->PrintCommand("Starting web server for '");
+		cli->PrintCommand(indexFile);
+		cli->PrintCommand("' on port ");
+		cli->PrintCommand(int2str(port));
+		cli->PrintCommand(".\n");
+
+
+		//read from file
+		uint8_t data[OFS_BLOCK_SIZE];
+		cli->filesystem->ReadLBA(indexFile, data, 0);
+		
+		uint16_t responseLength = strlen(RESPONSE_HTTP);
+		uint32_t messageLength = 0;
+		for (int i = 0; i < OFS_BLOCK_SIZE; i++) {
+		
+			if (data[i] == 0x00) {
+			
+				messageLength = i;
+				break;
+			}
+		}
+
+		//allocate and copy data to send
+		cli->network->fileDataSize = responseLength+messageLength+2;
+		cli->network->fileData = (uint8_t*)cli->mm->malloc(sizeof(uint8_t)*(cli->network->fileDataSize));
+
+		for (int i = 0; i < responseLength+messageLength; i++) {
+		
+			if (i < responseLength) { cli->network->fileData[i] = RESPONSE_HTTP[i];
+			} else {		  cli->network->fileData[i] = data[i-responseLength]; }
+		}
+		cli->network->fileData[responseLength+messageLength] = '\r';
+		cli->network->fileData[responseLength+messageLength+1] = '\n';
+
+
+		//establish tcp
+		//cli->tcpSocket = cli->network->tcp->Listen(80);
+		cli->webPort = port;
+		cli->tcpSocket = cli->network->tcp->Listen(port);
+		cli->network->tcp->Bind(cli->tcpSocket, cli->network);
+		//cli->tcpSocket->poll = false;
+		cli->network->activateServerHTTP = true;
+	
+		cli->PrintCommand("Listening for connections.\n");
+		cli->PrintCommand("\nMake sure to set up port forwarding for internet access.\n\n");
+
+	} else if (strcmp(argparse(args, 0), "stop")) {
+
+		//kill server	
+		if (cli->tcpSocket != nullptr) {
+			
+			cli->network->tcp->Disconnect(cli->tcpSocket);
+			cli->network->activateServerHTTP = false;
+		}
+
+		//free file data
+		if (cli->network->fileData != nullptr) {
+		
+			cli->mm->free(cli->network->fileData);
+			cli->network->fileData = nullptr;
+			cli->network->fileDataSize = 0;
+		}
+	}
+}
+
+
+
+
+void udp(char* args, CommandLine* cli) {
+
+	if (strcmp(argparse(args, 0), "send")) {
+
+		if (cli->udpSocket != nullptr) {
+		
+			cli->network->udp->Disconnect(cli->udpSocket);
+			cli->udpSocket = nullptr;
+		}
+			
+		uint32_t ip = str2ip(argparse(args, 1));
+		uint16_t port = str2int(argparse(args, 2));
+		cli->udpSocket = cli->network->udp->Connect(ip, port);
+		cli->network->udp->Bind(cli->udpSocket, cli->network);
+		cli->udpSocket->Send((uint8_t*)(args+5), strlen(args)-5);
+
+	} else if (strcmp(argparse(args, 0), "listen")) {
+	
+		uint32_t port = str2ip(argparse(args, 1));
+		cli->udpSocket = cli->network->udp->Listen(port);
+		cli->network->udp->Bind(cli->udpSocket, cli->network);
+		cli->PrintCommand("Listening on port ");
+		cli->PrintCommand(argparse(args, 1));
+		cli->PrintCommand(".\n");
+	} else {
+		cli->PrintCommand("1st arg must be 'send' or 'listen'.\n");	
+	}
+}
+
+void tcp(char* args, CommandLine* cli) {
+
+	if (strcmp(argparse(args, 0), "connect")) {
+		
+		if (cli->tcpSocket != nullptr) {
+		
+			cli->network->tcp->Disconnect(cli->tcpSocket);
+			cli->tcpSocket = nullptr;
+		}
+	
+		uint32_t ip = str2ip(argparse(args, 1));
+		uint16_t port = str2int(argparse(args, 2));
+		cli->tcpSocket = cli->network->tcp->Connect(ip, port);
+		cli->network->tcp->Bind(cli->tcpSocket, cli->network);
+
+	} else if (strcmp(argparse(args, 0), "listen")) {
+		
+		uint16_t port = str2int(argparse(args, 1));
+		cli->tcpSocket = cli->network->tcp->Listen(port);
+		cli->network->tcp->Bind(cli->tcpSocket, cli->network);
+		cli->PrintCommand("Listening on port ");
+		cli->PrintCommand(argparse(args, 1));
+		cli->PrintCommand(".\n");
+	
+	} else if (strcmp(argparse(args, 0), "send")) {
+
+		if (cli->tcpSocket == nullptr) {
+		
+			cli->PrintCommand("Send where? There's no connection.\n");
+		}
+
+		cli->PrintCommand("Sending TCP data...\n");
+		cli->tcpSocket->Send((uint8_t*)(args+5), strlen(args)-5);
+	
+	} else if (strcmp(argparse(args, 0), "disconnect")) {
+	
+		if (cli->tcpSocket != nullptr) {
+		
+			cli->network->tcp->Disconnect(cli->tcpSocket);
+		}
+	} else {
+		cli->PrintCommand("1st arg must be 'connect', 'send', 'listen', or 'disconnect'.\n");	
+	}
+}
+
+
+
+void download2file(char* args, CommandLine* cli) {
+
+	createFile(args, cli);
+	
+	int i = 0;
+	for (i; args[i] != '\0' && i < 32; i++) {
+	
+		cli->externalFile[i] = args[i];
+	}
+	cli->externalFile[i] = '\0';
+
+	cli->downloadExternalFile = true;
+
+	cli->PrintCommand("Ready to download network data.\n");
+	cli->PrintCommand("Remember to do 'tcp listen [port]'.\n");
+}
+
 
 //graphical commands
 void terminal(char* args, CommandLine* cli) {
 	
-	if (cli->gui) { cli->appWindow->parent->CreateChild(1, "Osaka's Terminal", 0); }
+	if (cli->gui) { cli->appWindow->parent->CreateChild(APP_TYPE_TERMINAL, "Osaka's Terminal", 0); }
 	else { cli->PrintCommand("This command is not available in text mode.\n"); }
 }
 
 
 void kasugapaint(char* args, CommandLine* cli) {
 	
-	if (cli->gui) { cli->appWindow->parent->CreateChild(2, "KasugaPaint", 0); }
+	if (cli->gui) { cli->appWindow->parent->CreateChild(APP_TYPE_KASUGAPAINT, "KasugaPaint", 0); }
 	else { cli->PrintCommand("This command is not available in text mode.\n"); }
 }
 
 void journal(char* args, CommandLine* cli) {
 	
-	if (cli->gui) { cli->appWindow->parent->CreateChild(3, "Journal", 0); }
+	if (cli->gui) { cli->appWindow->parent->CreateChild(APP_TYPE_JOURNAL, "Journal", 0); }
 	else { cli->PrintCommand("This command is not available in text mode.\n"); }
 }
 
-#ifdef __EMSCRIPTEN__
-void settings(char* args, CommandLine* cli) {
-	
-	if (cli->gui) { cli->appWindow->parent->CreateChild(5, "Settings", 0); }
+void shinosaka(char* args, CommandLine* cli) {
+
+	if (cli->gui) { cli->appWindow->parent->CreateChild(APP_TYPE_SHINOSAKA, "Shinosaka", 0); }
 	else { cli->PrintCommand("This command is not available in text mode.\n"); }
 }
-#endif
 
-#ifdef __EMSCRIPTEN__
-void iframe(char* args, CommandLine* cli) {
-	// Extract URL from args
-	char* url = argparse(args, 0);
-	
-	if (strlen(url) < 1) {
-		cli->PrintCommand("Usage: iframe <url>\n");
-		cli->PrintCommand("Example: iframe https://example.com\n");
-		return;
-	}
-	
-	if (cli->gui) {
-		// Create a window inside the OS with the URL as the window name
-		// The IframeApp will extract the URL from the name
-		cli->appWindow->parent->CreateChild(4, url, 0);
-		cli->PrintCommand("Opening iframe window: ");
-		cli->PrintCommand(url);
-		cli->PrintCommand("\n");
-	} else {
-		cli->PrintCommand("This command is not available in text mode.\n");
-	}
-}
-
-void favicon(char* args, CommandLine* cli) {
-	// Extract URL from args
-	char* url = argparse(args, 0);
-	
-	if (strlen(url) < 1) {
-		cli->PrintCommand("Usage: favicon <url>\n");
-		cli->PrintCommand("Example: favicon https://example.com/favicon.ico\n");
-		return;
-	}
-	
-	// Change favicon using JavaScript
-	EM_ASM_({
-		var urlPtr = $0;
-		var url = '';
-		
-		// Read URL from WASM memory
-		var i = 0;
-		while (HEAPU8[urlPtr + i] !== 0 && i < 256) {
-			url += String.fromCharCode(HEAPU8[urlPtr + i]);
-			i++;
-		}
-		
-		// Remove existing favicon links
-		var existingLinks = document.querySelectorAll("link[rel*='icon']");
-		for (var j = 0; j < existingLinks.length; j++) {
-			existingLinks[j].remove();
-		}
-		
-		// Create new favicon link
-		var link = document.createElement('link');
-		link.rel = 'icon';
-		link.type = 'image/x-icon';
-		link.href = url;
-		document.head.appendChild(link);
-		
-		console.log('[CLI] Favicon changed to:', url);
-	}, (uintptr_t)url);
-	
-	cli->PrintCommand("Favicon changed to: ");
-	cli->PrintCommand(url);
-	cli->PrintCommand("\n");
-}
-
-void title(char* args, CommandLine* cli) {
-	// Extract title from args
-	char* titleStr = argparse(args, 0);
-	
-	if (strlen(titleStr) < 1) {
-		cli->PrintCommand("Usage: title <text>\n");
-		cli->PrintCommand("Example: title My Custom OS Title\n");
-		return;
-	}
-	
-	// Change page title using JavaScript
-	EM_ASM_({
-		var titlePtr = $0;
-		var title = '';
-		
-		// Read title from WASM memory
-		var i = 0;
-		while (HEAPU8[titlePtr + i] !== 0 && i < 256) {
-			title += String.fromCharCode(HEAPU8[titlePtr + i]);
-			i++;
-		}
-		
-		// Change document title
-		document.title = title;
-		
-		console.log('[CLI] Page title changed to:', title);
-	}, (uintptr_t)titleStr);
-	
-	cli->PrintCommand("Page title changed to: ");
-	cli->PrintCommand(titleStr);
-	cli->PrintCommand("\n");
-}
-#else
-void iframe(char* args, CommandLine* cli) {
-	cli->PrintCommand("This command is only available in the web version.\n");
-}
-
-void favicon(char* args, CommandLine* cli) {
-	cli->PrintCommand("This command is only available in the web version.\n");
-}
-
-void title(char* args, CommandLine* cli) {
-	cli->PrintCommand("This command is only available in the web version.\n");
-}
-#endif
 
 void window(char* args, CommandLine* cli) {
 		
 	if (cli->gui && cli->userWindow == nullptr) {
 	
 		if (strlen(args) < 2) { cli->userWindow = cli->appWindow->parent->CreateChild(0, "OSaka Window", cli); }
-		else { cli->userWindow = cli->appWindow->parent->CreateChild(0, args, cli); }
+		else { cli->userWindow = cli->appWindow->parent->CreateChild(APP_TYPE_SCRIPT, args, cli); }
 
 		cli->targetWindow = true;
 	} else {
 		if (cli->gui) { cli->PrintCommand("Window is already active.\n"); } 
 		else { cli->PrintCommand("This command is not available in text mode.\n"); }
+	}
+}
+
+
+void charsetPrint(char* args, CommandLine* cli) {
+
+	char* str = "  ";
+	cli->PrintCommand("  0 1 2 3 4 5 6 7 8 9 A B C D E F\n", WBABAFF, TEXT_BOLD);
+
+	for (uint8_t i = 0; i < 16; i++) {
+			
+		char* row = "  ";
+	
+		if (i < 10) { row[0] = '0'+i;
+		} else {      row[0] = 'A'+(i-10); }
+		cli->PrintCommand(row, WBABAFF, TEXT_BOLD);
+
+		for (uint8_t j = 0; j < 16; j++) {
+		
+			str[0] = (char)((i*16)+j);
+			if (str[0] == '\v' || str[0] == '\n') { str[0] = ' '; }
+			cli->PrintCommand(str, WFFFFFF);
+		}
+		cli->PrintCommand("\n");
 	}
 }
 
@@ -958,6 +922,57 @@ void shortcut(char* args, CommandLine* cli) {
 
 	//make button
 	cli->appWindow->parent->CreateButton(argparse(args, 0), openType, imageFile);
+}
+
+
+void effect(char* args, CommandLine* cli) {
+		
+	uint8_t windowID = str2int(argparse(args, 1));
+	if (argcount(args) < 2) { windowID = -1;}
+
+
+	if (strcmp(argparse(args, 0), "wave")) {
+		
+		if (windowID < 0 || windowID > cli->appWindow->parent->numChildren) {
+			cli->appWindow->parent->Wave ^= 1;
+		} else {cli->appWindow->parent->children[windowID]->Wave ^= 1;}
+	
+	} else if (strcmp(argparse(args, 0), "pixel")) {
+	
+		if (windowID < 0 || windowID > cli->appWindow->parent->numChildren) {
+			cli->appWindow->parent->Pixelize ^= 1;
+		} else {cli->appWindow->parent->children[windowID]->Pixelize ^= 1; }
+	
+	} else if (strcmp(argparse(args, 0), "rainbow")) {
+	
+		if (windowID < 0 || windowID > cli->appWindow->parent->numChildren) {
+			cli->appWindow->parent->Rainbow ^= 1;
+		} else {cli->appWindow->parent->children[windowID]->Rainbow ^= 1; }
+	} else {
+		cli->PrintCommand("Unknown effect, use the 'wave', 'pixel', or 'rainbow' args.\n");
+	}
+}
+
+
+void cursor(char* args, CommandLine* cli) {
+
+	uint16_t w = 0;
+	uint16_t h = 0;
+	uint8_t buf[cli->vga->gfxBufferSize];
+	for (int i = 0; i < cli->vga->gfxBufferSize; i++) { buf[i] = 0x00; }
+	uint8_t* ptr = nullptr;
+	bool fileFound = false;
+
+	if (cli->filesystem->GetTagFile("compressed", cli->filesystem->GetFileSector(args), ptr)) {
+	
+		//very expensive operations
+		fileFound = cli->filesystem->Read13H(args, buf, &w, &h, true);
+	} else {
+		fileFound = cli->filesystem->Read13H(args, buf, &w, &h, false);
+	}
+
+	if (fileFound) { cli->appWindow->parent->LoadCursor(buf, w, h); }
+	else { 		 cli->appWindow->parent->LoadCursor(nullptr, w, h); }
 }
 
 
@@ -1043,8 +1058,8 @@ void drawpic(char* args, CommandLine* cli) {
 	uint32_t x = numOrVar(args, cli, 1);
 	uint32_t y = numOrVar(args, cli, 2);
 	uint16_t w = 0;
-	uint8_t h = 0;
-	uint8_t buf[64000]; //ew
+	uint16_t h = 0;
+	uint8_t buf[cli->vga->gfxBufferSize]; //ew
 
 	//if we dont do this, filename cant be recognized
 	//strings are just so fun to play with right?
@@ -1069,557 +1084,6 @@ void drawpic(char* args, CommandLine* cli) {
 	else { cli->appWindow->parent->FillBuffer(x, y, w, h, buf); }
 }
 
-
-//********************************************************AyumuScript*****************************************************************
-
-uint32_t numOrVar(char* args, CommandLine* cli, uint8_t argNum) {
-	
-	char* name = argparse(args, argNum);
-	uint16_t hashVar = hash(name) % 1024;
-	
-	if (cli->varTable[hashVar] != 0xffffffff) { return cli->varTable[hashVar];
-
-	} else if (name[0] == '$' && name[2] == '\0') {
-
-		//given arguments to script
-		if (name[1] <= '9' && name[1] >= '0') { return cli->argTable[name[1]-'0']; }
-
-		//value returned from most recent command
-		if (name[1] == 'R') { return cli->returnVal; }
-
-	//chars
-	} else if (name[0] == '@' && name[2] == '\0') { return (uint8_t)(name[1]);
-	
-	//input	
-	} else if (strcmp("$KEY_CHAR", name)) { return (uint8_t)(cli->Key);
-	} else if (strcmp("$KEY_PRESS", name)) { return cli->userWindow->keypress; 
-	} else if (strcmp("$LEFT_CLICK", name)) { return cli->userWindow->mouseclick; 
-	} else if (strcmp("$MOUSE_X", name)) { return cli->MouseX;
-	} else if (strcmp("$MOUSE_Y", name)) { return cli->MouseY;
-	
-	//str2int
-	} else { return str2int(name); }
-}
-
-
-//create variable
-void varInt(char* args, CommandLine* cli) {
-
-	char* name = argparse(args, 0);
-
-	if (((uint8_t)(name[0] - '0') < 10) || (name[0] == '$') || (name[0] == '@')) {
-		
-		char* foo = " "; 
-		foo[0] = name[0];
-	
-		cli->PrintCommand("error: name cannot begin with '");
-		cli->PrintCommand(foo);
-		cli->PrintCommand("'.\n");
-		return;
-	}
-
-	uint32_t value = numOrVar(args, cli, 1);
-	uint16_t hashVar = hash(name) % 1024;
-	
-	cli->varTable[hashVar] = value;	
-}
-
-
-
-
-//read raw int from table
-void rint(char* args, CommandLine* cli) {
-
-	uint32_t index = numOrVar(args, cli, 0);
-	
-	if (index >= 1024) {
-	
-		cli->PrintCommand("int error: index is greater than size of table (1024).\n");
-		return;
-	}
-	cli->returnVal = cli->varTable[index];
-}
-
-//write raw int from table
-void wint(char* args, CommandLine* cli) {
-
-	uint32_t index = numOrVar(args, cli, 0);
-	uint32_t value = numOrVar(args, cli, 1);
-
-	if (index >= 1024) {
-	
-		cli->PrintCommand("int error: index is greater than size of table (1024).\n");
-		return;
-	}
-	cli->varTable[index] = value;
-}
-
-//destroy raw int from table
-void dint(char* args, CommandLine* cli) {
-
-	uint32_t index = numOrVar(args, cli, 0);
-	
-	if (index >= 1024) {
-	
-		cli->PrintCommand("int error: index is greater than size of table (1024).\n");
-		return;
-	}
-	cli->varTable[index] = 0xffffffff;
-}
-
-
-//create list
-void varList(char* args, CommandLine* cli) {
-	
-	char* name = argparse(args, 0);
-	uint16_t hashVar = hash(name) % 1024;
-
-	if (((uint8_t)(name[0] - '0') < 10) || (name[0] == '$') || (name[0] == '@')) {
-		
-		char* foo = " "; 
-		foo[0] = name[0];
-	
-		cli->PrintCommand("error: name cannot begin with '");
-		cli->PrintCommand(foo);
-		cli->PrintCommand("'.\n");
-		return;
-	}
-
-	cli->varTable[hashVar] = cli->lists->numOfNodes;
-	
-	List* list = (List*)(cli->mm->malloc(sizeof(List)));
-	new (list) List(cli->mm);
-	cli->lists->Push(list);
-}
-
-//print each element in list
-void printList(char* args, CommandLine* cli) {
-
-	char* name = argparse(args, 0);
-	uint16_t hashVar = hash(name) % 1024;
-
-	if (cli->varTable[hashVar] >= cli->lists->numOfNodes) {
-	
-		cli->PrintCommand("List not found.\n");
-		return;
-	}
-
-	List* list = (List*)(cli->lists->Read(cli->varTable[hash(name) % 1024]));	
-	Node* node = list->entryNode;
-
-	for (int i = 0; i < list->numOfNodes; i++) {
-	
-		cli->PrintCommand(int2str(*(uint32_t*)(node->value)));
-		cli->PrintCommand("\n");
-		node = node->next;
-	}
-}
-
-
-//add to list
-void insertList(char* args, CommandLine* cli) {
-
-	char* name = argparse(args, 0);
-	uint16_t hashVar = hash(name) % 1024;
-	
-	if (cli->varTable[hashVar] >= cli->lists->numOfNodes) {
-	
-		cli->PrintCommand("List not found.\n");
-		return;
-	}
-	List* list = (List*)(cli->lists->Read(cli->varTable[hashVar]));	
-
-	uint32_t num = numOrVar(args, cli, 1);
-	uint32_t index = numOrVar(args, cli, 2);
-
-
-	uint32_t* newNum = (uint32_t*)(cli->mm->malloc(sizeof(uint32_t)));
-	new (newNum) uint32_t;
-	*newNum = num;
-		
-	if (argcount(args) < 3) { list->Push(newNum);
-	} else { list->Insert(newNum, index); }
-}
-
-
-//remove from list
-void removeList(char* args, CommandLine* cli) {
-
-	char* name = argparse(args, 0);
-	uint16_t hashVar = hash(name) % 1024;
-	
-	if (cli->varTable[hashVar] >= cli->lists->numOfNodes) {
-	
-		cli->PrintCommand("List not found.\n");
-		return;
-	}
-	List* list = (List*)(cli->lists->Read(cli->varTable[hashVar]));	
-
-	uint32_t index = numOrVar(args, cli, 1);
-
-	if (argcount(args) < 2) { list->Pop(); }
-	else { list->Remove(index); }
-}
-
-
-//read from list index and save into variable
-void readList(char* args, CommandLine* cli) {
-
-	char* name = argparse(args, 0);
-	uint16_t hashVar = hash(name) % 1024;
-	
-	if (cli->varTable[hashVar] >= cli->lists->numOfNodes) {
-	
-		cli->PrintCommand("List not found.\n");
-		return;
-	}
-	List* list = (List*)(cli->lists->Read(cli->varTable[hashVar]));
-
-	uint32_t index = numOrVar(args, cli, 1);
-	uint32_t* value = (uint32_t*)(list->Read(index));
-
-	//save to variable
-	char* varName = argparse(args, 2);
-	uint16_t readHashVar = hash(varName) % 1024;
-	
-	if (argcount(args) > 2) { cli->varTable[readHashVar] = *value; }
-	cli->returnVal = *value;
-}
-
-//write to preexisting node
-void writeList(char* args, CommandLine* cli) {
-
-	char* name = argparse(args, 0);
-	uint16_t hashVar = hash(name) % 1024;
-	
-	if (cli->varTable[hashVar] >= cli->lists->numOfNodes) {
-	
-		cli->PrintCommand("List not found.\n");
-		return;
-	}
-	List* list = (List*)(cli->lists->Read(cli->varTable[hashVar]));
-	
-	uint32_t index = numOrVar(args, cli, 1);
-	uint32_t value = numOrVar(args, cli, 2);
-	
-	uint32_t* newNum = (uint32_t*)(cli->mm->malloc(sizeof(uint32_t)));
-	new (newNum) uint32_t;
-	*newNum = value;
-	
-	list->Write(newNum, index);
-}
-
-
-
-//destroy list
-void destroyList(char* args, CommandLine* cli) {
-
-	char* name = argparse(args, 0);
-	uint16_t hashVar = hash(name) % 1024;
-	
-	if (cli->varTable[hashVar] >= cli->lists->numOfNodes) {
-	
-		cli->PrintCommand("List not found.\n");
-		return;
-	}
-
-	//if you remove list that was not most recently
-	//allocated, lists index in hash table will be fucked	
-	uint32_t index = cli->varTable[hashVar];	
-	List* list = (List*)(cli->lists->Read(index));
-	list->DestroyList();
-	cli->lists->Remove(index);
-	cli->varTable[hashVar] = 0xffffffff;
-}
-
-
-//comments
-void comment(char* args, CommandLine* cli) {
-}
-
-
-//conditionals
-
-bool trueOrFalse(char* op, uint32_t arg1, uint32_t arg2, CommandLine* cli) {
-
-	bool result = false;
-
-	switch (op[0]) {
-	
-		case '=': result = (arg1 == arg2); break;
-		case '!': result = (arg1 != arg2); break;
-		case '|': result = (arg1 || arg2); break;
-		case '&': result = (arg1 && arg2); break;
-		case '>':
-			if (op[1] == '=') { result = (arg1 >= arg2);
-			} else { 	    result = (arg1 > arg2); }
-			break;
-		case '<':
-			if (op[1] == '=') { result = (arg1 <= arg2);
-			} else {	    result = (arg1 < arg2); }
-			break;
-		default:
-			cli->PrintCommand("condition error: use correct syntax (e.g. 'if x < y')\n");
-			result = true;
-			break;
-	}
-	return result;
-}
-
-
-// if and loop statements
-
-void If(char* args, CommandLine* cli) {
-
-	uint32_t arg1 = numOrVar(args, cli, 0);
-	
-	//not enough args, just eval first arg
-	if (argcount(args) < 3) {
-	
-		cli->conditionIf = (arg1 > 0);
-		return;
-	}
-	
-	uint32_t arg2 = numOrVar(args, cli, 2);
-	char* op = argparse(args, 1);
-
-	cli->conditionIf = trueOrFalse(op, arg1, arg2, cli);
-}
-void Else(char* args, CommandLine* cli) { cli->conditionIf ^= 1; }
-void Fi(char* args, CommandLine* cli) { cli->conditionIf = true; }
-
-
-
-void loop(char* args, CommandLine* cli) {
-
-	uint32_t arg1 = numOrVar(args, cli, 0);
-	
-	//not enough args, just eval first arg
-	if (argcount(args) < 3) {
-	
-		cli->conditionLoop = (arg1 > 0);
-		return;
-	}
-	
-	uint32_t arg2 = numOrVar(args, cli, 2);
-	char* op = argparse(args, 1);
-	cli->conditionLoop = trueOrFalse(op, arg1, arg2, cli);
-}
-void pool(char* args, CommandLine* cli) { cli->conditionLoop = true; }
-
-
-uint32_t mathCMD(char* args, CommandLine* cli, uint8_t op) {
-
-	uint32_t result = 0;
-	uint32_t num = 0;
-
-	for (int i = 0; i < (argcount(args)-1); i++) {
-
-		num = numOrVar(args, cli, i+1);
-
-		if (!i) { 
-			result += num;
-		} else {
-			switch (op) {
-		
-				case 0: result += num; break;
-				case 1: result -= num; break;
-				case 2: result *= num; break;
-				
-				//div by 0 lol
-				case 3: 
-					if (num) { result /= num; }
-					break;
-				
-				case 4: 
-					if (num) { result %= num; }
-					break;
-				
-				case 5: result &= num; break;
-				case 6: result |= num; break;
-				case 7: result ^= num; break;
-				default:break;
-			}
-		}
-	}
-	return result;
-}
-
-
-
-//this is pretty ugly but every command must be its own function
-void add(char* args, CommandLine* cli) {
-
-	uint32_t sum = mathCMD(args, cli, 0);
-
-	uint16_t hashVar = hash(argparse(args, 0)) % 1024;
-	cli->varTable[hashVar] += sum;
-	cli->returnVal = sum;
-}
-
-
-void sub(char* args, CommandLine* cli) {
-
-	uint32_t dif = mathCMD(args, cli, 1);
-
-	uint16_t hashVar = hash(argparse(args, 0)) % 1024;
-	cli->varTable[hashVar] -= dif;
-	cli->returnVal = dif;
-}
-
-
-void mul(char* args, CommandLine* cli) {
-
-	uint32_t pro = mathCMD(args, cli, 2);
-
-	uint16_t hashVar = hash(argparse(args, 0)) % 1024;
-	cli->varTable[hashVar] *= pro;
-	cli->returnVal = pro;
-}
-
-
-void div(char* args, CommandLine* cli) {
-
-	uint32_t quo = mathCMD(args, cli, 3); 
-	uint16_t hashVar = hash(argparse(args, 0)) % 1024;
-	
-	if (quo) {
-		cli->varTable[hashVar] /= quo;
-		cli->returnVal = quo;
-	} else {
-		cli->returnVal = 0;
-	}
-}
-
-
-void mod(char* args, CommandLine* cli) {
-
-	uint32_t quo = mathCMD(args, cli, 4); 
-	uint16_t hashVar = hash(argparse(args, 0)) % 1024;
-	
-	if (quo) {
-		cli->varTable[hashVar] %= quo;
-		cli->returnVal = quo;
-	} else {
-		cli->returnVal = 0;
-	}
-}
-
-
-void bit_and(char* args, CommandLine* cli) {
-
-	uint32_t bit = mathCMD(args, cli, 5);
-
-	uint16_t hashVar = hash(argparse(args, 0)) % 1024;
-	cli->varTable[hashVar] &= bit;
-	cli->returnVal = bit;
-}
-
-
-void bit_or(char* args, CommandLine* cli) {
-
-	uint32_t bit = mathCMD(args, cli, 6);
-
-	uint16_t hashVar = hash(argparse(args, 0)) % 1024;
-	cli->varTable[hashVar] |= bit;
-	cli->returnVal = bit;
-}
-
-
-void bit_xor(char* args, CommandLine* cli) {
-
-	uint32_t bit = mathCMD(args, cli, 7);
-
-	uint16_t hashVar = hash(argparse(args, 0)) % 1024;
-	cli->varTable[hashVar] ^= bit;
-	cli->returnVal = bit;
-}
-
-
-void trig_sin(char* args, CommandLine* cli) {
-
-	uint16_t hashVar = hash(argparse(args, 0)) % 1024;
-	uint32_t num = numOrVar(args, cli, 0);
-	uint32_t amp = numOrVar(args, cli, 1);
-	if (amp < 1) { amp = 1; }
-	
-	uint32_t result = (uint32_t)(sin((double)(num)) * (double)amp);
-	cli->varTable[hashVar] = result;
-	cli->returnVal = result;
-}
-
-void trig_cos(char* args, CommandLine* cli) {
-	
-	uint16_t hashVar = hash(argparse(args, 0)) % 1024;
-	uint32_t num = numOrVar(args, cli, 0);
-	uint32_t amp = numOrVar(args, cli, 1);
-	if (amp < 1) { amp = 1; }
-	
-	uint32_t result = (uint32_t)(cos((double)(num)) * (double)amp);
-	cli->varTable[hashVar] = result;
-	cli->returnVal = result;
-}
-
-
-
-//execute script
-void ex(char* args, CommandLine* cli) {
-
-	char* file = argparse(args, 0);
-	uint32_t fileSector = cli->filesystem->GetFileSector(file);
-
-	if (cli->filesystem->FileIf(fileSector)) {
-
-		//parse script arguments
-		for (int i = 0; i < 10; i++) {
-		
-			cli->argTable[i] = str2int(argparse(args, i+1));
-		}
-
-		AyumuScriptCli(args, cli);
-		return;
-	}
-	cli->PrintCommand("Script file wasn't found.\n");
-}
-
-
-
-void ext(char* args, CommandLine* cli) {
-	
-	char* file = argparse(args, 0);
-	uint32_t priority = numOrVar(args, cli, 1) % 256;
-	uint32_t fileSector = cli->filesystem->GetFileSector(file);
-	int i = 0;
-	
-	if (cli->filesystem->FileIf(fileSector)) {
-
-		//parse script arguments
-		for (i = 0; i < 10; i++) {
-		
-			cli->argTable[i] = str2int(argparse(args, i+1));
-		}	
-		
-		//load and create task
-		//passing this given cli
-		//while script creates its own
-		//cli to use for commands
-		LoadScriptForTask(true, cli);
-	
-		//prepare file name to share with
-		//a bunch of other bullshit	
-		for (i = 0; args[i] != '\0' && args[i] != ' '; i++) {
-		
-			cli->scriptName[i] = args[i];
-		}
-		cli->scriptName[i] = '\0';
-	
-		//add task finally
-		cli->tm->taskPriority[cli->tm->numTasks-1] = priority;
-		cli->CreateTaskForScript(file);
-		return;
-	}
-	cli->PrintCommand("Script file wasn't found.\n");
-}
 
 //execute binary
 void exb(char* args, CommandLine* cli) {
@@ -1662,6 +1126,7 @@ void exb(char* args, CommandLine* cli) {
 	//allocate and add task
 	Task* task = (Task*)(cli->mm->malloc(sizeof(Task)));
 	new (task) Task(cli->gdt, (void(*)())(entrypoint), "bin generic", instructionCount);
+	task->binary = true;
 	//new (task) Task(cli->gdt, (void(*)())(code), "bin generic", instructionCount);
 
 	//yes this is a memory leak, the loader isn't really 
@@ -1686,84 +1151,89 @@ void regPrint(char* args, CommandLine* cli) {
 }
 
 
-//********************************************************END*****************************************************************
-
-
 
 
 //misc. commands
 void version(char* args, CommandLine* cli) {
 
-	cli->PrintCommand("osakaOS v2.1\n");
+	cli->PrintCommand("osakaOS v3.0\n");
 	cli->PrintCommand("Copyleft, Leechplus Software\n");
 }
 
 
 void help(char* args, CommandLine* cli) {
 	
-	char* ch = " \n";
-	ch[0] = 2;
+	char* ch = " .\n";
+	ch[0] = 1;
 
-	cli->PrintCommand("\nWelcome to osakaOS!\n");
-	cli->PrintCommand("This is the command line interface.\n");
-	cli->PrintCommand("Please take it easy ");
-	cli->PrintCommand(ch);
+	cli->PrintCommand("\nWelcome to osakaOS!\n", WFFFFFF, TEXT_ITALIC);
+	cli->PrintCommand("This is the command line interface.\n", WFFFFFF);
+	cli->PrintCommand("Please take it easy ", WFFFFFF);
+	cli->PrintCommand(ch, WFFFFFF);
+	
+	if (cli->gui) {
+		cli->PrintCommand("\n\nClick on the desktop icons to launch a program.\n", WFFFFFF);
+		cli->PrintCommand("  'Terminal'    ", WFF5555, TEXT_BOLD);
+		cli->PrintCommand("- system command line.\n", WFFFFFF);
+		cli->PrintCommand("  'KasugaPaint' ", W55FF55, TEXT_BOLD);
+		cli->PrintCommand("- draw and display images.\n", WFFFFFF);
+		cli->PrintCommand("  'Journal'     ", W5555FF, TEXT_BOLD);
+		cli->PrintCommand("- edit text based files.\n", WFFFFFF);
+		cli->PrintCommand("  'Shinosaka'   ", WAA00AA, TEXT_BOLD);
+		cli->PrintCommand("- web utility & browser.\n\n", WFFFFFF);
+		
+		/*
+		cli->PrintCommand("  'Terminal'    - system command line you're using now.\n", WFFFFFF);
+		cli->PrintCommand("  'KasugaPaint' - simple paint program to draw and display images.\n", WFFFFFF);
+		cli->PrintCommand("  'Journal'     - text editor program for all text based files.\n", WFFFFFF);
+		cli->PrintCommand("  'Shinosaka'   - web utility for loading simple HTML pages.\n\n", WFFFFFF);
+		*/
+	} else {
+		cli->PrintCommand("In VGA text mode, use the keyboard shortcuts: \n", WFFFFFF);
+		cli->PrintCommand("    ctrl+e - file edit mode (ctrl-w to write file)\n", WFFFFFF);
+		cli->PrintCommand("    ctrl+p - piano mode (press keys to play notes)\n", WFFFFFF);
+		cli->PrintCommand("    ctrl+s - snake mode (wasd to play snake game)\n", WFFFFFF);
+		cli->PrintCommand("    ctrl+c - exit mode (return back to cli)\n", WFFFFFF);
+	}
 
-	cli->PrintCommand("If you feel lost, try the following commands: \n\n");
-	cli->PrintCommand("    'say (string)', 'osaka (int)', 'beep (int)',\n");
-	cli->PrintCommand("    'files', 'delete (file)', 'ex (file)',\n");
-	cli->PrintCommand("    'int (string) (int)', '+ (string) (int)',\n");
-	cli->PrintCommand("    'rdisk (int) (int)', 'wdisk (int) (string)'\n");
-	cli->PrintCommand("    'rmem (int)', 'wmem (int) (int)', 'iframe (url)'\n");
-	cli->PrintCommand("    'favicon (url)', 'title (string)'\n\n");
+	cli->PrintCommand("If you feel lost, try the following commands: \n", WFFFFFF);
+	cli->PrintCommand("  say (str)        ", W0000FF, TEXT_BOLD);
+	cli->PrintCommand("- print given text.\n", WFFFFFF);
+	cli->PrintCommand("  files            ", W0000FF, TEXT_BOLD);
+	cli->PrintCommand("- list all existing files.\n", WFFFFFF);
+	cli->PrintCommand("  var (str) (type) ", W0000FF, TEXT_BOLD);
+	cli->PrintCommand("- create scripting variable.\n", WFFFFFF);
+	cli->PrintCommand("  (variable name)  ", W0000FF, TEXT_BOLD);
+	cli->PrintCommand("- display value of variable.\n", WFFFFFF);
+	cli->PrintCommand("  ext (file)       ", W0000FF, TEXT_BOLD);
+	cli->PrintCommand("- run as AyumuScript program.\n", WFFFFFF);
+	cli->PrintCommand("  reboot           ", W0000FF, TEXT_BOLD);
+	cli->PrintCommand("- restart the machine.\n\n", WFFFFFF);
 	
-	cli->PrintCommand("Or use these keyboard shortcuts: \n\n");
-	
-	cli->PrintCommand("    ctrl+e - file edit mode (ctrl-w to write file)\n");
-	cli->PrintCommand("    ctrl+p - piano mode (press keys to play notes)\n");
-	cli->PrintCommand("    ctrl+s - snake mode (wasd to play snake game)\n");
-	cli->PrintCommand("    ctrl+c - exit mode (return back to cli)\n");
+	cli->PrintCommand("Consult online matieral at youtube.com/@dpacarana.\n", WFFFFFF);
 }
 
 
 void azufetch(char* args, CommandLine* cli) {
 
-	uint16_t previousColor = setTextColor(false);
-
 	//system info
-	uint32_t memory = ((cmosDetectMemory()*4)/1024/1024)+1;
-	char* cpu = nullptr;
-
-	#ifdef __EMSCRIPTEN__
-		int isWasm = EM_ASM_INT({
-			if (!WebAssembly.isWasm2js) {
-				return 1;
-			} else {
-				return 0;
-			}
-		});
-		if (isWasm) {
-			cpu = "WASM\n";
-		} else {
-			cpu = "Javascript(ASM.js)\n";
-		}
-	#else
-		cpu = "486 (harcoded btw)\n";
-	#endif
-	
+	uint32_t memory = ((cmosDetectMemory()*4)/VAR_TABLE_SIZE/VAR_TABLE_SIZE)+1;
 
 	//colors for text/vga
 	uint8_t w, p, b, r = 0; //white, pink, blue, red
-	if (cli->gui) { w = 0x3f, p = 0x3d, b = 0x39, r = 0x3c;
-	} else { 	w = 0x0f, p = 0x0d, b = 0x09, r = 0x0c; }
+	if (cli->gui) { w = WFFFFFF, p = WFF55FF, b = W5555FF, r = WFF5555;
+	} else { 	w = WBABAFF, p = WBE00FF, b = W0000FF, r = WAA0055; }
 	
-	cli->PrintCommand("\n  A-Z-U-F-E-T-C-H\n", w);
+	cli->PrintCommand("\n  ");
+	cli->PrintCommand("AZUFETCH\n", w, TEXT_HEADER);
 	cli->PrintCommand("   ____________   \n", p);
-	cli->PrintCommand("  /------------\\   ", p); cli->PrintCommand("OS:  ", b); cli->PrintCommand("osakaOS\n", w);
-	cli->PrintCommand(" /---________---\\  ", p); cli->PrintCommand("CPU: ", r); cli->PrintCommand(cpu, w);
+	cli->PrintCommand("  /------------\\   ", p); cli->PrintCommand("OS:  ", b); cli->PrintCommand("osakaOS\n", w, TEXT_BOLD);
+	cli->PrintCommand(" /---________---\\  ", p); cli->PrintCommand("CPU: ", r); cli->PrintCommand("486 (harcoded btw)\n", w, TEXT_UNDERLINE);
 	cli->PrintCommand("/---/-v-/\\-v-\\---\\ ", p); cli->PrintCommand("MEM: ", b); cli->PrintCommand(int2str(memory), w); cli->PrintCommand("MB of memory\n", w);
-	cli->PrintCommand("|--/-/ v  v \\-\\--| ", p); cli->PrintCommand("VGA: ", r); 
-	if (cli->gui == false) { cli->PrintCommand("80x25 Textmode\n", w);} else { cli->PrintCommand("320x200 Mode 13h\n", w); }
+	cli->PrintCommand("|--/-/ v  v \\-\\--| ", p); cli->PrintCommand("VID: ", r);
+	if (cli->gui == false) { 	cli->PrintCommand("80x25 Textmode\n", w);} 
+	else if (cli->vga->vesa) { 	cli->PrintCommand("640x480 VESA 101h\n", w); }
+	else { 				cli->PrintCommand("320x200 Mode 13h\n", w); }
 	cli->PrintCommand("|--|v        v|--|\n", p);
 	cli->PrintCommand("|--|  O    O  |--|\n", p);
 	cli->PrintCommand("|--|   ____   |--|\n", p);
@@ -1772,9 +1242,6 @@ void azufetch(char* args, CommandLine* cli) {
 	cli->PrintCommand("|-----|    |-----|\n", p);
 	cli->PrintCommand("|-v--/\\____/\\--v-|\n", p);
 	cli->PrintCommand(" v v/@@@@@@@@\\v v \n", p);
-
-	//set previous color back
-	setTextColor(true, previousColor);
 }
 
 
@@ -1807,7 +1274,7 @@ void rng(char* args, CommandLine* cli) {
 
 	cli->PrintCommand(int2str(prngNum));
 	cli->PrintCommand("\n");
-	cli->returnVal = prngNum;
+	cli->returnVar->typeInt = prngNum;
 }
 
 
@@ -1877,12 +1344,24 @@ void clear(char* args, CommandLine* cli) {
 
 	if (strcmp("all", argparse(args, 0))) {
 	
-		for (int i = 0; i < 1024; i++) {
+		for (int i = 0; i < VAR_TABLE_SIZE; i++) {
 		
-			cli->varTable[i] = 0xffffffff;
-			cli->conditionIf = true;
-			cli->conditionLoop = true;
+			if (cli->varTable[i] != nullptr) {
+		
+				if (cli->varTable[i]->typeStr != nullptr) {
+				
+					cli->mm->free(cli->varTable[i]->typeStr);
+				}
+				if (cli->varTable[i]->typeFunc != nullptr) {
+				
+					cli->mm->free(cli->varTable[i]->typeFunc);
+				}
+				cli->mm->free(cli->varTable[i]);
+			}
+			cli->varTable[i] = nullptr;
 		}
+		cli->conditionIf = true;
+		cli->conditionLoop = true;
 	}
 }
 
@@ -1915,365 +1394,18 @@ void dad(char* args, CommandLine* cli) {
 	}
 }
 
-// Execute JavaScript code from CLI
-void js(char* args, CommandLine* cli) {
-#ifdef __EMSCRIPTEN__
-	if (!args || args[0] == '\0') {
-		cli->PrintCommand("Usage: js <javascript_code>\n");
-		return;
-	}
-	
-	// Execute JavaScript code
-	EM_ASM_({
-		try {
-			var code = UTF8ToString($0);
-			eval(code);
-		} catch (e) {
-			console.error('[CLI->JS] Error executing JavaScript:', e);
-		}
-	}, args);
-#else
-	cli->PrintCommand("JavaScript execution is only available in web version.\n");
-#endif
-}
-
-// Download file from URL
-void download(char* args, CommandLine* cli) {
-#ifdef __EMSCRIPTEN__
-	if (!args || args[0] == '\0') {
-		cli->PrintCommand("Usage: download <url> [filename]\n");
-		cli->PrintCommand("Example: download https://example.com/file.txt myfile.txt\n");
-		return;
-	}
-	
-	char* url = argparse(args, 0);
-	char* filenameArg = argparse(args, 1);
-	
-	if (strlen(url) < 1) {
-		cli->PrintCommand("Error: URL is required.\n");
-		return;
-	}
-	
-	// Always use a local buffer for filename to ensure it's valid
-	char filename[33];
-	for (int i = 0; i < 33; i++) {
-		filename[i] = '\0';
-	}
-	
-	// If no filename provided, extract from URL
-	if (filenameArg == nullptr || strlen(filenameArg) < 1) {
-		// Extract filename from URL
-		int urlLen = strlen(url);
-		int lastSlash = -1;
-		int lastDot = -1;
-		
-		for (int i = urlLen - 1; i >= 0; i--) {
-			if (url[i] == '/' && lastSlash == -1) {
-				lastSlash = i;
-			}
-			if (url[i] == '.' && lastDot == -1) {
-				lastDot = i;
-			}
-		}
-		
-		if (lastSlash >= 0 && lastSlash < urlLen - 1) {
-			int start = lastSlash + 1;
-			int end = urlLen;
-			// Remove query parameters if present
-			for (int i = start; i < urlLen; i++) {
-				if (url[i] == '?' || url[i] == '#') {
-					end = i;
-					break;
-				}
-			}
-			
-			int nameLen = end - start;
-			if (nameLen > 0 && nameLen < 33) {
-				for (int i = 0; i < nameLen; i++) {
-					filename[i] = url[start + i];
-				}
-				filename[nameLen] = '\0';
-			} else {
-				// Default name if extraction fails
-				for (int i = 0; i < 8; i++) {
-					filename[i] = "download"[i];
-				}
-				filename[8] = '\0';
-			}
-		} else {
-			// Default name if no slash found
-			for (int i = 0; i < 8; i++) {
-				filename[i] = "download"[i];
-			}
-			filename[8] = '\0';
-		}
-	} else {
-		// Copy provided filename, ensuring it's null-terminated and within limits
-		int nameLen = strlen(filenameArg);
-		if (nameLen > 32) nameLen = 32; // Max 32 chars for filename
-		for (int i = 0; i < nameLen; i++) {
-			filename[i] = filenameArg[i];
-		}
-		filename[nameLen] = '\0';
-	}
-	
-	// Debug: Print the filename being used
-	EM_ASM_({
-		console.log('[DOWNLOAD] Using filename:', UTF8ToString($0));
-	}, filename);
-	
-	// Check if file already exists
-	uint32_t fileSector = cli->filesystem->GetFileSector(filename);
-	if (cli->filesystem->FileIf(fileSector)) {
-		cli->PrintCommand("Error: File '");
-		cli->PrintCommand(filename);
-		cli->PrintCommand("' already exists. Delete it first or use a different name.\n");
-		return;
-	}
-	
-	cli->PrintCommand("Downloading from: ");
-	cli->PrintCommand(url);
-	cli->PrintCommand("\n");
-	
-	// Allocate buffer for downloaded data (max 1MB for now)
-	const uint32_t maxSize = 1024 * 1024;
-	uint8_t* downloadBuffer = (uint8_t*)(cli->mm->malloc(maxSize));
-	if (!downloadBuffer) {
-		cli->PrintCommand("Error: Failed to allocate memory for download.\n");
-		return;
-	}
-	
-	// Download file using JavaScript fetch API
-	uint32_t downloadedSize = 0;
-	int downloadSuccess = EM_ASM_INT({
-		var urlPtr = $0;
-		var bufferPtr = $1;
-		var maxSize = $2;
-		var sizePtr = $3;
-		
-		// Read URL from WASM memory
-		var url = '';
-		var i = 0;
-		while (HEAPU8[urlPtr + i] !== 0 && i < 256) {
-			url += String.fromCharCode(HEAPU8[urlPtr + i]);
-			i++;
-		}
-		
-		// Try direct download first, then fallback to CORS proxy if needed
-		var useProxy = false;
-		var binaryString = '';
-		var responseSize = 0;
-		
-		// First attempt: direct download
-		try {
-			var xhr = new XMLHttpRequest();
-			xhr.open('GET', url, false);
-			xhr.overrideMimeType('text/plain; charset=x-user-defined');
-			xhr.send(null);
-			
-			// Check if request succeeded
-			if (xhr.status === 200 || xhr.status === 0) {
-				binaryString = xhr.responseText || '';
-				responseSize = binaryString.length;
-				console.log('[DOWNLOAD] Direct download succeeded');
-			} else {
-				// HTTP error, try proxy
-				useProxy = true;
-			}
-		} catch (e) {
-			// CORS or network error - try proxy
-			console.log('[DOWNLOAD] Direct download failed, trying CORS proxy...');
-			useProxy = true;
-		}
-		
-		// Fallback to CORS proxy
-		if (useProxy) {
-			try {
-				// Try CORS proxy services one by one
-				var proxySuccess = false;
-				
-				// Try proxy 1: allorigins.win
-				if (!proxySuccess) {
-					try {
-						var proxyUrl1 = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
-						var proxyXhr1 = new XMLHttpRequest();
-						proxyXhr1.open('GET', proxyUrl1, false);
-						proxyXhr1.overrideMimeType('text/plain; charset=x-user-defined');
-						proxyXhr1.send(null);
-						
-						if (proxyXhr1.status === 200 || proxyXhr1.status === 0) {
-							binaryString = proxyXhr1.responseText || '';
-							responseSize = binaryString.length;
-							console.log('[DOWNLOAD] CORS proxy 1 succeeded');
-							proxySuccess = true;
-						}
-					} catch (e1) {
-						// Try next proxy
-					}
-				}
-				
-				// Try proxy 2: corsproxy.io
-				if (!proxySuccess) {
-					try {
-						var proxyUrl2 = 'https://corsproxy.io/?' + encodeURIComponent(url);
-						var proxyXhr2 = new XMLHttpRequest();
-						proxyXhr2.open('GET', proxyUrl2, false);
-						proxyXhr2.overrideMimeType('text/plain; charset=x-user-defined');
-						proxyXhr2.send(null);
-						
-						if (proxyXhr2.status === 200 || proxyXhr2.status === 0) {
-							binaryString = proxyXhr2.responseText || '';
-							responseSize = binaryString.length;
-							console.log('[DOWNLOAD] CORS proxy 2 succeeded');
-							proxySuccess = true;
-						}
-					} catch (e2) {
-						// Try next proxy
-					}
-				}
-				
-				// Try proxy 3: codetabs.com
-				if (!proxySuccess) {
-					try {
-						var proxyUrl3 = 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url);
-						var proxyXhr3 = new XMLHttpRequest();
-						proxyXhr3.open('GET', proxyUrl3, false);
-						proxyXhr3.overrideMimeType('text/plain; charset=x-user-defined');
-						proxyXhr3.send(null);
-						
-						if (proxyXhr3.status === 200 || proxyXhr3.status === 0) {
-							binaryString = proxyXhr3.responseText || '';
-							responseSize = binaryString.length;
-							console.log('[DOWNLOAD] CORS proxy 3 succeeded');
-							proxySuccess = true;
-						}
-					} catch (e3) {
-						// All proxies failed
-					}
-				}
-				
-				if (!proxySuccess) {
-					console.error('[DOWNLOAD] All CORS proxies failed');
-					return 0;
-				}
-			} catch (proxyError) {
-				console.error('[DOWNLOAD] CORS proxy error');
-				return 0;
-			}
-		}
-		
-		// Write the downloaded data to WASM memory
-		if (responseSize > 0) {
-			var size = Math.min(responseSize, maxSize);
-			
-			for (var j = 0; j < size; j++) {
-				HEAPU8[bufferPtr + j] = binaryString.charCodeAt(j) & 0xff;
-			}
-			
-			HEAPU32[sizePtr >> 2] = size;
-			console.log('[DOWNLOAD] Downloaded', size, 'bytes');
-			return 1;
-		} else {
-			console.error('[DOWNLOAD] No data received');
-			return 0;
-		}
-	}, (uintptr_t)url, (uintptr_t)downloadBuffer, maxSize, (uintptr_t)&downloadedSize);
-	
-	if (!downloadSuccess) {
-		cli->PrintCommand("Error: Failed to download file.\n");
-		cli->PrintCommand("This may be due to CORS (Cross-Origin Resource Sharing) restrictions.\n");
-		cli->PrintCommand("The download command automatically tries a CORS proxy if the direct request fails.\n");
-		cli->PrintCommand("If it still fails, try:\n");
-		cli->PrintCommand("  1. Use a URL that supports CORS\n");
-		cli->PrintCommand("  2. Use a file hosting service that allows CORS\n");
-		cli->PrintCommand("  3. Download from the same origin as this page\n");
-		cli->mm->free(downloadBuffer);
-		return;
-	}
-	
-	if (downloadedSize == 0) {
-		cli->PrintCommand("Error: Downloaded file is empty.\n");
-		cli->mm->free(downloadBuffer);
-		return;
-	}
-	
-	// Write file to filesystem
-	// For files larger than OFS_BLOCK_SIZE, we need to write in chunks
-	uint32_t blockSize = OFS_BLOCK_SIZE;
-	uint32_t numBlocks = (downloadedSize + blockSize - 1) / blockSize; // Ceiling division
-	
-	// Prepare first block data (NewFile expects exactly OFS_BLOCK_SIZE bytes)
-	uint8_t firstBlock[OFS_BLOCK_SIZE];
-	for (uint32_t i = 0; i < OFS_BLOCK_SIZE; i++) {
-		if (i < downloadedSize) {
-			firstBlock[i] = downloadBuffer[i];
-		} else {
-			firstBlock[i] = 0; // Pad with zeros
-		}
-	}
-	
-	// Create file with first block and total size
-	bool created = cli->filesystem->NewFile(filename, firstBlock, downloadedSize);
-	
-	if (!created) {
-		cli->PrintCommand("Error: Failed to create file.\n");
-		cli->mm->free(downloadBuffer);
-		return;
-	}
-	
-	// Write additional blocks if file is larger than one block
-	for (uint32_t lba = 1; lba < numBlocks; lba++) {
-		uint8_t blockData[OFS_BLOCK_SIZE];
-		uint32_t offset = lba * blockSize;
-		
-		// Copy data for this block, pad with zeros if needed
-		for (uint32_t i = 0; i < blockSize; i++) {
-			if (offset + i < downloadedSize) {
-				blockData[i] = downloadBuffer[offset + i];
-			} else {
-				blockData[i] = 0; // Pad with zeros
-			}
-		}
-		
-		bool written = cli->filesystem->WriteLBA(filename, blockData, lba);
-		
-		if (!written) {
-			cli->PrintCommand("Warning: Failed to write block ");
-			cli->PrintCommand(int2str(lba));
-			cli->PrintCommand(".\n");
-			break;
-		}
-	}
-	
-	// Update file size if needed (should already be set by NewFile, but just in case)
-	uint32_t currentSize = cli->filesystem->GetFileSize(filename);
-	if (currentSize != downloadedSize) {
-		uint32_t location = cli->filesystem->GetFileSector(filename);
-		cli->filesystem->UpdateSize(location, downloadedSize);
-	}
-	
-	cli->mm->free(downloadBuffer);
-	
-	cli->PrintCommand("Downloaded '");
-	cli->PrintCommand(filename);
-	cli->PrintCommand("' (");
-	cli->PrintCommand(int2str(downloadedSize));
-	cli->PrintCommand(" bytes).\n");
-#else
-	cli->PrintCommand("Download command is only available in web version.\n");
-#endif
-}
 
 CommandLine::CommandLine(GlobalDescriptorTable* gdt, 
 			TaskManager* tm, 
 			MemoryManager* mm,
 			FileSystem* filesystem,
+			Network* network,
 			Compiler* compiler,
 			VideoGraphicsArray* vga,
 			CMOS* cmos,
 			DriverManager* drvManager) {
 	
-	this->appType = 1;
+	this->appType = APP_TYPE_TERMINAL;
 	
 	this->vga = vga;
 	this->gdt = gdt;
@@ -2282,11 +1414,17 @@ CommandLine::CommandLine(GlobalDescriptorTable* gdt,
 	this->drvManager = drvManager;
 	this->cmos = cmos;
 	this->filesystem = filesystem;
+	this->network = network;
 	this->compiler = compiler;
 	
 	List* lists = (List*)(mm->malloc(sizeof(List)));
 	new (lists) List(mm);
 	this->lists = lists;
+	
+	
+	List* funcStates = (List*)(mm->malloc(sizeof(List)));
+	new (funcStates) List(mm);
+	this->callStack = funcStates;
 
 	this->userTask = nullptr;
 
@@ -2295,12 +1433,16 @@ CommandLine::CommandLine(GlobalDescriptorTable* gdt,
 
 
 	//init variables for scripts
-	for (int i = 0; i < 1024; i++) {
+	for (int i = 0; i < VAR_TABLE_SIZE; i++) {
 			
-		this->varTable[i] = 0xffffffff;
-		if (i < 10) { this->argTable[i] = 0; }
+		this->varTable[i] = nullptr;
+		if (i < 10) { this->argTable[i] = nullptr; }
 	}
-	
+
+	//create generic type for return val
+	int32_t initVal = 0;
+	this->returnVar = (Type*)mm->malloc(sizeof(Type));
+	new (this->returnVar) Type(TYPE_INT, (void*)&initVal);
 }
 
 CommandLine::~CommandLine() {
@@ -2308,8 +1450,53 @@ CommandLine::~CommandLine() {
 	Task* freeTask = this->userTask;
 	this->mm->free(freeTask);
 	this->userTask = nullptr;
+
+	if (this->tcpSocket != nullptr) {
+		
+		this->network->tcp->Disconnect(this->tcpSocket);
+	}
 }
 
+
+
+void CommandLine::CleanCommandLine() {
+
+	if (returnVar->typeStr != nullptr) { mm->free(returnVar->typeStr); }
+	if (returnVar->typeFunc != nullptr) {
+					     mm->free(returnVar->typeFunc->args); 
+					     mm->free(returnVar->typeFunc); }
+	this->mm->free(this->returnVar);
+
+	for (int i = 0; i < this->lists->numOfNodes; i++) {
+	
+		List* list = (List*)(this->lists->Read(i));
+		list->DestroyList();
+	}
+
+	for (int i = 0; i < VAR_TABLE_SIZE; i++) {
+	
+		if (this->varTable[i] != nullptr) {
+
+			if (this->varTable[i]->typeStr != nullptr) {
+			
+				this->mm->free(this->varTable[i]->typeStr);
+			}
+			if (this->varTable[i]->typeFunc != nullptr) {
+			
+				this->mm->free(this->varTable[i]->typeFunc);
+			}
+			this->mm->free(this->varTable[i]);
+		}
+	}
+
+	this->lists->DestroyList();
+	this->mm->free(this->lists);
+
+	this->callStack->DestroyList();
+	this->mm->free(this->callStack);
+
+	this->DeleteTaskForScript();
+}
 
 
 void CommandLine::SaveOutput(char* filename, CompositeWidget* widget, FileSystem* filesystem) {
@@ -2332,7 +1519,7 @@ void CommandLine::CreateTaskForScript(char* fileName) {
 }
 
 
-void CommandLine::DeleteTaskForScript(uint8_t taskNum) {
+void CommandLine::DeleteTaskForScript() {
 
 	if (this->userTask != nullptr) {
 	
@@ -2357,7 +1544,7 @@ void CommandLine::hash_add(char* cmd, void func(char*, CommandLine* cli)) {
 
 void CommandLine::hash_cli_init() {
 
-	for (int i = 0; i < 65536; i++) {
+	for (int i = 0; i < CMD_TABLE_SIZE; i++) {
 	
 		CommandLine::cmdTable[i] = nullptr;
 	}
@@ -2376,13 +1563,7 @@ void CommandLine::hash_cli_init() {
 	this->hash_add("tasks", tasks);
 	this->hash_add("kill", kill);
 	this->hash_add("schedule", schedule);
-	this->hash_add("ip", ip);
-	this->hash_add("ping", ping);
 	this->hash_add("reboot", rebootCMD);
-	
-	//mode switching
-	this->hash_add("gui", startGUI);
-	this->hash_add("cli", startCLI);
 	
 	//hw ports and asm
 	this->hash_add("wport8",  PortWrite8);
@@ -2427,22 +1608,27 @@ void CommandLine::hash_cli_init() {
 	this->hash_add("delete", deleteFile);
 	this->hash_add("encrypt", encrypt);
 	this->hash_add("decrypt", decrypt);
-#ifdef __EMSCRIPTEN__
-	this->hash_add("download", download);
-#endif
+
+	//network
+	this->hash_add("ip", ip);
+	this->hash_add("arp", arp);
+	this->hash_add("ping", ping);
+	this->hash_add("udp", udp);
+	this->hash_add("tcp", tcp);
+	this->hash_add("web", web);
+	this->hash_add("control", control);
+	this->hash_add("download", download2file);
 
 	//vga/graphical
 	this->hash_add("terminal", terminal);
 	this->hash_add("kasugapaint", kasugapaint);
 	this->hash_add("journal", journal);
-#ifdef __EMSCRIPTEN__
-	this->hash_add("settings", settings);
-	this->hash_add("iframe", iframe);
-	this->hash_add("favicon", favicon);
-	this->hash_add("title", title);
-#endif
+	this->hash_add("shinosaka", shinosaka);
 	this->hash_add("window", window);
 	this->hash_add("shortcut", shortcut);
+	this->hash_add("effect", effect);
+	this->hash_add("cursor", cursor);
+	this->hash_add("charset", charsetPrint);
 	this->hash_add("targetgui", targetgui);
 	this->hash_add("putpixel", putpixel);
 	this->hash_add("drawrect", drawrect);
@@ -2461,11 +1647,10 @@ void CommandLine::hash_cli_init() {
 	//special commands for scripting
 	this->hash_add("ex", ex);
 	this->hash_add("ext", ext);
+	this->hash_add("input", inputStr);
 	
-	this->hash_add("int", varInt);
-	this->hash_add("rint", rint);
-	this->hash_add("wint", wint);
-	this->hash_add("dint", dint);
+	this->hash_add("var", var);
+	this->hash_add("dvar", dvar);
 
 	this->hash_add("list", varList);
 	this->hash_add("prlist", printList);
@@ -2480,69 +1665,38 @@ void CommandLine::hash_cli_init() {
 	this->hash_add("if", If);
 	this->hash_add("else", Else);
 	this->hash_add("fi", Fi);
-	
 	this->hash_add("loop", loop);
 	this->hash_add("pool", pool);
-
-	this->hash_add("+", add);
-	this->hash_add("-", sub);
-	this->hash_add("*", mul);
-	this->hash_add("/", div);
-	this->hash_add("%", mod);
-	this->hash_add("&", bit_and);
-	this->hash_add("|", bit_or);
-	this->hash_add("^", bit_xor);
-	this->hash_add("sin", trig_sin);
-	this->hash_add("cos", trig_cos);
-
+	
+	this->hash_add("function", function);
+	this->hash_add("end", Fi);
+	this->hash_add("return", setReturn);
+	this->hash_add("=", evalMath);
+	
 	this->hash_add("offset", offsetptr);
 	
 	this->hash_add("sata", sata);
-	
-#ifdef __EMSCRIPTEN__
-	this->hash_add("js", js);
-#endif
-	
-#ifdef __EMSCRIPTEN__
-	this->hash_add("js", js);
-#endif
 }
 
 
 //cli for desktop
-void CommandLine::PrintCommand(char* str, uint16_t color) {
+void CommandLine::PrintCommand(char* str, uint16_t color, uint8_t flags) {
 
 	if (this->mute) { return; }
 
 	if (color) {
+	
+		uint16_t previousColor = setTextColor(false);
+		
 		if (gui) { this->appWindow->textColor = setTextColor(true, color); }
 		else { setTextColor(true, color); }
+	
+		setTextColor(true, previousColor);
 	}
 	
 	if (gui) { 
-		// Ensure appWindow is initialized before printing
-		if (this->appWindow == nullptr) {
-#ifdef __EMSCRIPTEN__
-			EM_ASM_({
-				console.warn('[CLI] PrintCommand: appWindow is null, outputting to console:', UTF8ToString($0));
-			}, str);
-			// Fall back to printf for debugging
-			printf(str);
-#else
-			printf(str);
-#endif
-			return;
-		}
-		
-		if (this->targetWindow) { 
-			if (this->userWindow != nullptr) {
-				this->userWindow->Print(str);
-			} else {
-				this->appWindow->Print(str);
-			}
-		} else { 
-			this->appWindow->Print(str); 
-		}
+		if (this->targetWindow) { this->userWindow->Print(str, flags);
+		} else {		  this->appWindow->Print(str, flags); }
 	} else { 
 		printf(str); 
 	}
@@ -2550,6 +1704,36 @@ void CommandLine::PrintCommand(char* str, uint16_t color) {
 
 
 void CommandLine::OnKeyDown(char ch, CompositeWidget* widget) {
+
+	if (this->getCurrentInput) {
+	
+		switch (ch) {
+			
+			case '\n':
+				this->scriptInput[scriptInputIndex] = '\0';
+				scriptInputIndex = 0;
+				widget->PutChar('\n');
+				this->getCurrentInput = false;
+				break;
+			case '\b':
+				if (scriptInputIndex > 0) {
+				
+					scriptInputIndex--;
+					this->scriptInput[scriptInputIndex] = '\0';
+					widget->PutChar('\b');
+				}
+				break;
+			default:
+				if (scriptInputIndex < 256) {
+
+					this->scriptInput[scriptInputIndex] = ch;
+					scriptInputIndex++;
+					widget->PutChar(widget->keyCharWidget);
+				}
+				break;
+		}
+	} else {
+
 
 	int i = 0;
 
@@ -2590,7 +1774,7 @@ void CommandLine::OnKeyDown(char ch, CompositeWidget* widget) {
 			index = 0;
 				
 			//shell interface
-			widget->textColor = 0x24;
+			widget->textColor = WFF0000;
 			widget->PutChar('$');
 			widget->textColor = setTextColor(false);
 			widget->PutChar(':');
@@ -2621,6 +1805,7 @@ void CommandLine::OnKeyDown(char ch, CompositeWidget* widget) {
 			widget->PutChar(128);
 			break;
 	}
+	}
 }
 void CommandLine::OnKeyUp(char ch, CompositeWidget* widget) {
 }
@@ -2637,10 +1822,10 @@ void CommandLine::ComputeAppState(GraphicsContext* gc, CompositeWidget* widget) 
 		this->appWindow = widget;
 		this->gui = true;
 		
-		setTextColor(true, 0x3f);
-		widget->textColor = 0x24;
+		setTextColor(true, WFFFFFF);
+		widget->textColor = WFF0000;
 		widget->PutChar('$');
-		widget->textColor = 0x3f;
+		widget->textColor = WFFFFFF;
 		widget->PutChar(':');
 		widget->PutChar(' ');
 
@@ -2653,13 +1838,93 @@ void CommandLine::ComputeAppState(GraphicsContext* gc, CompositeWidget* widget) 
 			}
 			CommandLine::WakeupInit = true;
 		}
-
 		this->init = true;
+	}
+				
+	
+	if (this->tcpSocket != nullptr) {
+				
+		if (this->tcpSocket->handleType != HANDLE_FLAG_EMPTY) {
+
+			uint32_t packetSize = this->tcpSocket->bufferIndex;
+			uint8_t* packetData = this->tcpSocket->handleBuffer;
+	
+			//command and control server mode
+			if (this->network->activateServerCMD == true) {
+		
+				for (int i = 0; i < this->tcpSocket->bufferIndex; i++) {
+			
+					if ((this->tcpSocket->handleBuffer[i] < 32 && 
+				    		this->tcpSocket->handleBuffer[i] > 127) ||
+						this->tcpSocket->handleBuffer[i] == '\n') {
+				
+						this->tcpSocket->bufferIndex = i;
+					}
+				}
+			
+				this->tcpSocket->handleBuffer[this->tcpSocket->bufferIndex] = '\0';
+				this->command((char*)this->tcpSocket->handleBuffer, this->tcpSocket->bufferIndex);
+			
+			//hosting web server
+			} else if (this->network->activateServerHTTP == true) {
+				
+				//print full network packet data to terminal
+				char* foo = " ";
+				for (int i = 0; i < packetSize; i++) {
+		
+					foo[0] = (char)(packetData[i]);
+					this->PrintCommand(foo);
+				}
+
+				//get ready for another requests
+				if (this->tcpSocket != nullptr) {
+				
+					this->mm->free(this->tcpSocket);
+				}
+				this->tcpSocket = this->network->tcp->Listen(this->webPort);
+				this->network->tcp->Bind(this->tcpSocket, this->network);
+				
+
+				//this->PrintCommand("\nSending web-file data to client...\n", W5555FF, TEXT_BOLD);
+			
+			//download external file
+			} else if (this->downloadExternalFile == true) {
+			
+				uint8_t data[OFS_BLOCK_SIZE];
+				
+				for (int i = 0; i < (packetSize/OFS_BLOCK_SIZE)+1; i++) {
+				
+					for (int j = 0; j < OFS_BLOCK_SIZE; j++) {
+					
+						data[j] = packetData[i*OFS_BLOCK_SIZE+j];
+					}
+					this->filesystem->WriteLBA(this->externalFile, data, i);
+				}
+				this->downloadExternalFile = false;
+			} else {
+				//print full network packet data to terminal
+				char* foo = " ";
+				for (int i = 0; i < packetSize; i++) {
+		
+					foo[0] = (char)(packetData[i]);
+					this->PrintCommand(foo);
+				}
+			}
+			this->network->EmptyHandleBufferTCP(this->tcpSocket);
+			this->tcpSocket->handleType = HANDLE_FLAG_EMPTY;
+		}
+		
+		if (this->tcpSocket->connectionFail) {
+		
+			this->PrintCommand("\nFailed to establish TCP connection", WFF5555, TEXT_BOLD);
+			this->tcpSocket->connectionFail = false;
+		}
 	}
 	App::ComputeAppState(gc, widget);
 }
 
 
+//returns nullptr if function call return cmd otherwise
 char* CommandLine::command(char* cmd, uint8_t length) {
 
 	char* command = cmd;
@@ -2678,12 +1943,10 @@ char* CommandLine::command(char* cmd, uint8_t length) {
 			
 			argLength = length - i;
 			args = (argLength > 0);
-			
 			cmdLength = i;
 		}
 
 		if (args) {
-			
 			pipe = (cmd[i] == '!' && cmd[i-1] != '\\');
 			
 			if (pipe) {
@@ -2701,13 +1964,11 @@ char* CommandLine::command(char* cmd, uint8_t length) {
 						recursivePipeOffset = j;
 					}
 				}
-
 				//recursively execute piped command
 				pipeCommand[j] = '\0';
 				this->command(pipeCommand, j);
 				break;
 			}
-
 			//arguments for command
 			arguments[i - (cmdLength + 1)] = cmd[i];
 		}
@@ -2719,35 +1980,62 @@ char* CommandLine::command(char* cmd, uint8_t length) {
 	uint16_t result = hash(command);
 	
 	
-	if (this->conditionIf == false && result != hash("fi")) { return "i dont care anymore its 4am lol"; }
-	//if (result != hash("else")) { return "i dont care anymore its 4am lol"; }
+	if (this->conditionIf == false && result != hash("fi") && result != hash("end")) { return "i dont care anymore its 4am lol"; }
 	if (this->conditionLoop == false && result != hash("pool")) { return "i dont care anymore its 4am lol"; }
 
 
 	//actual command found
-	if (this->cmdTable[result] != nullptr)  {
-		EM_ASM_({
-			console.log('[CLI] Executing command:', UTF8ToString($0), ', args:', UTF8ToString($1));
-		}, command, arguments);	
+	if (this->cmdTable[result] != nullptr)  {	
 	
 		(*CommandLine::cmdTable[result])(arguments, this); //execute function from array
 		arguments[0] = '\0';
 	} else {
+		Type* var = this->varTable[result % VAR_TABLE_SIZE];
+
 		//variable
-		if (this->varTable[result % 1024] != 0xffffffff) {
+		if (var != nullptr) {
 			
 			if (mute) { return cmd; }
-				
-			PrintCommand(int2str(this->varTable[result % 1024]));
-			PrintCommand("\n");
+			
+			switch (var->type) {
+			
+				case TYPE_INT:
+					PrintCommand(int2str(var->typeInt));
+					PrintCommand("\n");
+					break;
+				case TYPE_FLOAT:
+					PrintCommand(float2str(var->typeFloat));
+					PrintCommand("\n");
+					break;
+				case TYPE_STRING:
+					PrintCommand(var->typeStr);
+					PrintCommand("\n");
+					break;
+				case TYPE_FUNCTION:
+					{
+						setFunctionArgs(arguments, this, var->typeFunc);
+					
+						//load and call function manually
+						if (this->scriptRunning == false) {
+					
+							uint32_t size = var->typeFunc->LoadFunction(this->filesystem);
+							AyumuScriptCli(var->typeFunc->file, this, var->typeFunc->buf, size);
+							return cmd;
+						}
+						return nullptr;
+					}
+					break;
+				default:break;
+			}
 				
 		//unknown command		
 		} else {
 			if (length < 0xff) {
 
-				PrintCommand("'");
-				PrintCommand(command);
-				PrintCommand("' is an unknown command or variable.\n");		
+				PrintCommand("ERROR: ", WFF0000, TEXT_BOLD);
+				PrintCommand("'", WFFFFFF);
+				PrintCommand(command, WFFFFFF);
+				PrintCommand("' is not a command or variable.\n", WFFFFFF);		
 				makeBeep(60);
 
 			} else {
@@ -2758,49 +2046,3 @@ char* CommandLine::command(char* cmd, uint8_t length) {
 	}
 	return cmd;
 }
-
-#ifdef __EMSCRIPTEN__
-// Function to execute CLI commands from JavaScript
-extern "C" {
-	EMSCRIPTEN_KEEPALIVE void executeCLICommand(const char* cmd) {
-		CommandLine* cli = LoadMainCLI(false);
-		if (cli == nullptr) {
-			EM_ASM_({
-				console.error('[JS->CLI] CLI not initialized yet');
-			});
-			return;
-		}
-		
-		if (cmd == nullptr || cmd[0] == '\0') {
-			EM_ASM_({
-				console.error('[JS->CLI] Command is null or empty');
-			});
-			return;
-		}
-		
-		// Calculate command length (max 255 for safety)
-		uint8_t length = 0;
-		while (cmd[length] != '\0' && length < 255) {
-			length++;
-		}
-		
-		// Use local buffer to avoid memory management issues
-		char cmdBuffer[256];
-		for (uint8_t i = 0; i < length; i++) {
-			cmdBuffer[i] = cmd[i];
-		}
-		cmdBuffer[length] = '\0';
-		
-		EM_ASM_({
-			console.log('[JS->CLI] Executing command:', UTF8ToString($0), 'length:', $1);
-		}, cmdBuffer, length);
-		
-		// Execute the command
-		cli->command(cmdBuffer, length);
-		
-		EM_ASM_({
-			console.log('[JS->CLI] Command execution completed');
-		});
-	}
-}
-#endif

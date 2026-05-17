@@ -3,10 +3,6 @@
 #include <memorymanagement.h>
 #include <art.h>
 #include <hardwarecommunication/interrupts.h>
-#include <new>
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#endif
 #include <hardwarecommunication/pci.h>
 #include <drivers/driver.h>
 #include <drivers/keyboard.h>
@@ -14,10 +10,12 @@
 #include <drivers/vga.h>
 #include <drivers/amd_am79c973.h>
 #include <drivers/ata.h>
+#include <drivers/ac97.h>
 #include <drivers/speaker.h>
 #include <drivers/pit.h>
 #include <drivers/cmos.h>
 #include <gui/desktop.h>
+#include <gui/button.h>
 #include <gui/window.h>
 #include <gui/widget.h>
 #include <gui/sim.h>
@@ -26,33 +24,29 @@
 #include <gui/pixelart.h>
 #include <multitasking.h>
 #include <code/asm.h>
-#include <net/network.h>
 #include <net/etherframe.h>
 #include <net/arp.h>
 #include <net/ipv4.h>
 #include <net/icmp.h>
+#include <net/udp.h>
+#include <net/tcp.h>
+#include <net/network.h>
 #include <filesys/ofs.h>
 #include <cli.h>
 #include <script.h>
 #include <app.h>
 #include <list.h>
+#include <string.h>
 #include <app/paint.h>
 #include <app/file_edit.h>
 #include <app/file_browse.h>
+#include <app/browser.h>
 #include <mode/piano.h>
 #include <mode/snake.h>
 #include <mode/file_edit.h>
 #include <mode/space.h>
 #include <math.h>
 
-#ifdef __EMSCRIPTEN__
-// Forward declaration for web version of printf (C linkage)
-extern "C" {
-    void printf(char* strChr);
-}
-void printfLine(const char* str, uint8_t line);
-void printfHex(uint8_t key);
-#endif
 
 using namespace os;
 using namespace os::common;
@@ -147,7 +141,6 @@ uint16_t setTextColor(bool set, uint16_t color = 0x07) {
 
 
 //the main print function for textmode
-#ifndef __EMSCRIPTEN__
 void printf(char* strChr) {
 	
 	static uint8_t x = 0, y = 0;
@@ -246,10 +239,8 @@ void printf(char* strChr) {
 		}
 	}
 }
-#endif // __EMSCRIPTEN__
 
 
-#ifndef __EMSCRIPTEN__
 void printfLine(const char* str, uint8_t line) {
 
 	for (uint16_t i = 0; str[i] != '\0'; i++) {
@@ -258,12 +249,11 @@ void printfLine(const char* str, uint8_t line) {
 		*vidmem = str[i] | 0x700;
 	}
 }
-#endif // __EMSCRIPTEN__
 
 
 
-#ifndef __EMSCRIPTEN__
 void printfHex(uint8_t key) {
+
 	char* foo = "00 ";
 	char* hex = "0123456789ABCDEF";
 
@@ -271,161 +261,26 @@ void printfHex(uint8_t key) {
 	foo[1] = hex[key & 0x0F];
 	printf(foo);
 }
-#endif // __EMSCRIPTEN__
 
 
+uint8_t* memset(uint8_t* buf, int value, size_t n) {
 
-uint16_t strlen(char* args) {
-
-	uint16_t length = 0;
-	for (length = 0; args[length] != '\0'; length++) {}
-	return length;
-}
-
-
-
-bool strcmp(char* one, char* two) {
-
-	uint16_t i = 0;
-
-	for (i; one[i] != '\0'; i++) {
+	for (size_t i = 0; i < n; i++) {
 	
-		if (one[i] != two[i]) { return false; }
+		buf[i] = value;
 	}
-	return true;
+	return buf;
 }
 
+uint32_t valCount(uint8_t* buf, uint8_t value, size_t n) {
 
-
-uint32_t str2int(char* args) {
-
-	uint32_t number = 0;
-	uint16_t i = 0;
-	bool gotNum = false;
-
-	for (uint16_t i = 0; args[i] != '\0'; i++) {
-		
-		if ((args[i] >= 58 || args[i] <= 47) && args[i] != ' ') {
-
-			return 0;
-		}
-
-		if (args[i] != ' ') {
-
-			number *= 10;
-			number += ((uint32_t)args[i] - 48);
-			gotNum = true;
-			args[i] = ' ';
-                } else {
-                        if (gotNum) { return number; }
-		}
+	uint32_t retVal = 0;
+	
+	for (size_t i = 0; i < n; i++) {
+	
+		retVal += (1 * (buf[i] == value));
 	}
-	return number;
-}
-
-
-char* int2str(uint32_t num) {
-
-	uint32_t numChar = 1;
-	uint8_t i = 1;
-
-	if (num % 10 != num) {
-
-		while ((num / (numChar)) >= 10) {
-
-			numChar *= 10;
-			i++;
-		}
-		char* str = "4294967296";
-		uint8_t strIndex = 0;
-
-		while (i) {
-
-			str[strIndex] = (char)(((num / (numChar)) % 10) + 48);
-
-			if (numChar >= 10) { numChar /= 10; }
-			strIndex++;
-			i--;
-		}
-		str[strIndex] = '\0';
-		return str;
-	}
-	char* str = " ";
-	str[0] = (num + 48);
-	
-	return str;
-}
-
-float str2float(char* str) {
-
-	char beforeDecimal[16];
-	char afterDecimal[16];
-
-	int i = 0;
-	for (i; str[i] != '.'; i++) { beforeDecimal[i] = str[i]; }
-	beforeDecimal[i] = '\0';
-	
-	int j = 0;
-	for (j = i; str[j] != '\0'; j++) { afterDecimal[j-i] = str[j]; }
-	afterDecimal[j-i] = '\0';
-
-	float val = 0.0;
-	val += (float)(str2int(beforeDecimal));
-	val += ((float)(str2int(beforeDecimal)))/((j-i)*10);
-
-	return val;
-}
-
-
-char* argparse(char* args, uint8_t num) {
-
-	char buffer[256];
-
-	bool valid = false;
-	uint8_t argIndex = 0;
-	uint8_t bufferIndex = 0;
-
-
-	for (int i = 0; i < (strlen(args) + 1); i++) {
-	
-		if (args[i] == ' ' || args[i] == '\0') {
-		
-			if (valid) {
-				if (argIndex == num) {
-				
-					buffer[bufferIndex] = '\0';
-					char* arg = buffer;
-					return arg;
-				}
-				argIndex++;
-			}
-			valid = false;
-		} else {
-			if (argIndex == num) {
-				
-				buffer[bufferIndex] = args[i];
-				bufferIndex++;
-			}
-			valid = true;
-		}
-	}
-	//       |
-	//this   v
-	return "wtf";
-}
-
-uint8_t argcount(char* args) {
-
-	uint8_t i = 0;
-	char* foo = argparse(args, i);
-	
-	//and this gotta be the same
-	while (foo != "wtf") {
-	
-		foo = argparse(args, i);
-		i++;
-	}	
-	return i-1;
+	return retVal;
 }
 
 
@@ -453,11 +308,12 @@ class CLIKeyboardEventHandler : public KeyboardEventHandler, public CommandLine 
 					TaskManager* tm,
 					MemoryManager* mm,
 					FileSystem* filesystem,
+					Network* network,
 					Compiler* compiler,
 					VideoGraphicsArray* vga,
 					CMOS* cmos,
 					DriverManager* drvManager) 
-		: CommandLine(gdt, tm, mm, filesystem, compiler, vga, cmos, drvManager) {
+		: CommandLine(gdt, tm, mm, filesystem, network, compiler, vga, cmos, drvManager) {
 		
 			this->cli = true;
 		}
@@ -600,9 +456,6 @@ class CLIKeyboardEventHandler : public KeyboardEventHandler, public CommandLine 
 
 						input[0] = 0x00;
 						index = 0;
-						
-						// Display $ prompt after command
-						printf("\t");
 						break;
 					//type
 					default:
@@ -698,37 +551,63 @@ class CLIKeyboardEventHandler : public KeyboardEventHandler, public CommandLine 
 };
 
 
-void sleep(uint32_t ms) {}
+
+
+
+uint32_t readCount() {
+
+	uint32_t count = 0;
+	Port8Bit channel0(0x40);
+	Port8Bit commandPort(0x43);
+	
+	asm("cli");
+	commandPort.Write(0);
+	count = channel0.Read();
+	count |= channel0.Read() << 8;
+	asm("sti");
+	
+	return count;
+}
+
+void sleep(uint32_t ms) {
+	
+	Port8Bit channel0(0x40);
+
+	for (uint32_t i = 0; i < ms; i++) {
+	
+		asm("cli");
+		channel0.Write(1193182/1000);
+		channel0.Write((1193182/1000) >> 8);
+		asm("sti");
+		
+		uint32_t start = readCount();
+		while ((start - readCount() < 1000)) {}
+	}
+
+}
+
 
 double getTicks() {
 
 	Port8Bit cmdPort(0x43);
 	Port8Bit channel0(0x40);
 
-#ifndef __EMSCRIPTEN__
 	asm("cli");
-#endif
 
 	channel0.Write(1193182/1000);
 	channel0.Write((1193182/1000) >> 8);
 	
-#ifndef __EMSCRIPTEN__
 	asm("sti");
-#endif
 	
 	
-#ifndef __EMSCRIPTEN__
 	asm("cli");
-#endif
 	
 	cmdPort.Write(0x00);
 	
 	uint32_t count = channel0.Read();
 	count |= channel0.Read() << 8;
 	
-#ifndef __EMSCRIPTEN__
 	asm("sti");
-#endif
 
 	return (double)(count);
 }
@@ -752,35 +631,17 @@ uint32_t memRead(uint32_t memory) {
 
 void printOsaka(uint8_t num, bool cube) {
 
-
-	if (cube) {	
-		//osaka.cubeScreen('.', 0.6, &cubeData);
-		return;
-	} else {
-		printf("\v");
-	}
-
+	if (cube) {	return;
+	} else {	printf("\v"); }
 
 	switch (num) {
 	
-		case 0:
-			osakaFace();
-			break;
-		case 1:
-			osakaHead();
-			break;
-		case 2:
-			god();
-			break;
-		case 3:
-			osakaKnife();
-			break;
-		case 4:
-			osakaAscii();
-			break;
-		default:
-			osakaFace();
-			break;
+		case 0:	osakaFace();	break;
+		case 1:	osakaHead();	break;
+		case 2:	god();		break;
+		case 3:	osakaKnife();	break;
+		case 4:	osakaAscii();	break;
+		default:osakaFace();	break;
 	}
 }
 
@@ -795,13 +656,6 @@ void makeBeep(uint32_t freq) {
 
 uint16_t prng() {
 
-#ifdef __EMSCRIPTEN__
-	// Use JavaScript Math.random() for web version
-	// This ensures we get proper random numbers
-	return (uint16_t)EM_ASM_INT({
-		return Math.floor(Math.random() * 65536);
-	});
-#else
 	//PIT pit;
 	
 	asm("cli");
@@ -815,6 +669,8 @@ uint16_t prng() {
 	
 	asm("sti");
 
+
+	
 	uint16_t lfsr = (uint16_t)seed;
 	uint16_t period = 0;
 
@@ -829,15 +685,27 @@ uint16_t prng() {
 	
 
 	return lfsr;
-#endif
+}
+
+
+uint16_t hash(char* str) {
+
+	uint32_t val = 0x811c9dc5;
+
+	for (int i = 0; str[i] != '\0'; i++) {
+	
+		val ^= str[i];
+		val *= 0x01000193;
+	}
+	val++;
+
+	return (val >> 16) ^ (val & 0xffff);
 }
 
 
 void reboot() {
 
-#ifndef __EMSCRIPTEN__
 	asm volatile ("cli");
-#endif
 
 	uint8_t read = 0x02;
 	Port8Bit resetPort(0x64);
@@ -848,14 +716,7 @@ void reboot() {
 	}
 
 	resetPort.Write(0xfe);
-#ifndef __EMSCRIPTEN__
 	asm volatile ("hlt");
-#endif
-#ifdef __EMSCRIPTEN__
-	EM_ASM({
-		window.location.reload();
-	});
-#endif
 }
 
 uint32_t cmosDetectMemory() {
@@ -900,43 +761,64 @@ uint32_t cmosDetectMemory() {
 }
 
 
+//find minimal difference in web values
+uint8_t Web2VGA(uint32_t color) {
 
-uint8_t Web2EGA(uint32_t color) {
+	float Rc = (color >> 16);
+	float Gc = (color >> 8) & 0xff;
+	float Bc = (color & 0xff);
 
-	uint8_t bytes[3];
-	bytes[2] = color >> 16;
-	bytes[1] = (color >> 8) & 0xff;
-	bytes[0] = color & 0xff;
+	float closest = (255.0*255.0)*3.0 + 1.0;
+	uint8_t index = 0;
 
-	uint8_t result = 0;
-
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < 256; i++) {
 	
-		if        (bytes[i] < 0x2b) { bytes[i] = 0x00;
-		} else if (bytes[i] < 0x80) { bytes[i] = 0x55; 
-		} else if (bytes[i] < 0xd5) { bytes[i] = 0xaa; 
-		} else {		      bytes[i] = 0xff; }
-	}
+		float Rp = (defaultPalette[i] >> 16);
+		float Gp = (defaultPalette[i] >> 8) & 0xff;
+		float Bp = (defaultPalette[i] & 0xff);
 
-	for (int i = 0; i < 3; i++) {
-	
-		switch (bytes[i]) {
+		float euclidDist = ((Rp-Rc)*(Rp-Rc)) + 
+				   ((Gp-Gc)*(Gp-Gc)) +
+				   ((Bp-Bc)*(Bp-Bc));
+
+		if (closest > euclidDist) {
 		
-			//both sets of
-			//3 bits
-			case 0xff:
-				result |= (1 << (i+3));
-				result |= (1 << i);
-				break;
-			//most sig 3 bits
-			case 0x55: result |= (1 << (i+3)); break;
-			//least sig 3 bits
-			case 0xaa: result |= (1 << i); break;
-			default: break;
+			closest = euclidDist;
+			index = i;
+		
+		} else if (euclidDist < 0.05) {
+		
+			index = i;
+			break;
 		}
 	}
-	return result;
+	
+	if (index == W_EMPTY) { index = W000000; }
+	
+	return index;
 }
+
+
+class PrintfTCPHandler : public TransmissionControlProtocolHandler {
+
+	public:
+		bool HandleTransmissionControlProtocolMessage(TransmissionControlProtocolSocket* socket, 
+							uint8_t* data, uint16_t size) {
+	
+			printf("received message: ");
+
+			char* foo = " ";
+			for (int i = 0; i < size; i++) {
+			
+				foo[0] = data[i];
+				printf(foo);
+			}
+			printf("\n");
+			
+			return true;
+		}
+};
+
 
 
 TaskManager* LoadTaskManager(bool set, TaskManager* tm = 0) {
@@ -946,20 +828,11 @@ TaskManager* LoadTaskManager(bool set, TaskManager* tm = 0) {
 	return manager;
 }
 
-CommandLine* LoadMainCLI(bool set, CommandLine* cli = 0);
-
 CommandLine* LoadScriptForTask(bool set, CommandLine* cli = 0) {
 
 	static CommandLine* script = 0;
 	if (set) { script = cli; }
 	return script;
-}
-
-// Global function to store/retrieve main CLI instance for JavaScript access
-CommandLine* LoadMainCLI(bool set, CommandLine* cli) {
-	static CommandLine* mainCLI = 0;
-	if (set) { mainCLI = cli; }
-	return mainCLI;
 }
 
 Desktop* LoadDesktopForTask(bool set, Desktop* desktop = 0) {
@@ -969,43 +842,17 @@ Desktop* LoadDesktopForTask(bool set, Desktop* desktop = 0) {
 	return retDesktop;
 }
 
-// Global flag to request GUI mode switch from CLI
-bool RequestGUIMode(bool set, bool value = false) {
-	static bool requestGUI = false;
-	if (set) { requestGUI = value; }
-	return requestGUI;
-}
-
-// Global flag to request CLI mode switch from GUI
-bool RequestCLIMode(bool set, bool value = false) {
-	static bool requestCLI = false;
-	if (set) { requestCLI = value; }
-	return requestCLI;
-}
-
 void DrawDesktopTask() {
 
 	Desktop* desktop = LoadDesktopForTask(false);
-	desktop->gc->SetMode(320, 200, 8);
 
-#ifdef __EMSCRIPTEN__
-	printf("[KERNEL] DrawDesktopTask started\n");
-#endif
-
-	while (1) { 
-		desktop->Draw(desktop->gc);
-#ifdef __EMSCRIPTEN__
-		emscripten_sleep(0); // Yield to browser event loop
-#endif
-	}
+	while (1) { desktop->Draw(desktop->gc); }
 }
 
 
 typedef void (*constructor)();
 extern "C" constructor start_ctors;
 extern "C" constructor end_ctors;
-
-
 
 extern "C" void callConstructors() {
 
@@ -1015,110 +862,105 @@ extern "C" void callConstructors() {
 }
 
 
-//extern "C" void kmain(void* multiboot_structure, uint32_t magicnumber) {
+struct MultibootInfo {
+
+	uint32_t flags;
+	uint32_t memLower;
+	uint32_t memUpper;
+	uint32_t bootDevice;
+	uint32_t commandLine;
+	uint32_t moduleCount;
+	uint32_t moduleAddress;
+	uint32_t syms[4];
+	uint32_t memMapLength;
+	uint32_t memMapAddress;
+	uint32_t drivesLength;
+	uint32_t drivesAddress;
+	uint32_t configTable;
+	uint32_t bootLoaderName;
+	uint32_t apmTable;
+	uint32_t vbeControlInfo;
+	uint32_t vbeModeInfo;
+	uint16_t vbeMode;
+	uint16_t vbeInterfaceSeg;
+	uint16_t vbeInterfaceOff;
+	uint16_t vbeInterfaceLength;
+	
+	//gfx
+	uint64_t frameBufferAddress;
+	uint32_t frameBufferPitch;
+	uint32_t frameBufferWidth;
+	uint32_t frameBufferHeight;
+	uint8_t frameBufferBPP;
+	uint8_t frameBufferType;
+
+} __attribute__((packed));
+
+
+
 extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 
-#ifdef __EMSCRIPTEN__
-	// Yield early to allow page to render
-	// emscripten_sleep(0);
-	EM_ASM({
-		document.getElementById('title').textContent = '';
-		document.getElementById('loading').textContent = '';
-	});
-#endif
-
-	// Initialize GDT first
-	GlobalDescriptorTable gdt_instance;
-	GlobalDescriptorTable* gdt = &gdt_instance;
-	TaskManager taskManager(gdt);
-	
 	printf("Hello :^)\n");
-	printf("[KERNEL] kernelMain started\n");
+
+	GlobalDescriptorTable* gdt;
+	
+	struct MultibootInfo* mbi = (struct MultibootInfo*)multiboot_structure;
 	
 	//heap manager
-	// Safely access multiboot structure at offset 8 (mem_upper field)
-	// Use a safer pointer access method for Emscripten
-	uint32_t memupper_value;
-#ifdef __EMSCRIPTEN__
-	// For Emscripten, use EM_ASM to safely read from the multiboot structure
-	// This avoids pointer validation issues
-	memupper_value = EM_ASM_INT({
-		var ptr = $0;
-		if (!ptr) return 0;
-		try {
-			var heapSize = HEAPU8.length;
-			if (ptr + 8 < 0 || ptr + 8 + 4 > heapSize) {
-				// Out of bounds, return default 8MB
-				return 8192;
-			}
-			// Read uint32_t at offset 8 (little-endian)
-			return HEAPU32[(ptr + 8) >> 2];
-		} catch (e) {
-			// On error, return default 8MB in KB
-			return 8192;
-		}
-	}, multiboot_structure);
-#else
-	uint32_t* memupper = (uint32_t*)(((os::common::size_t)multiboot_structure) + 8);
-	memupper_value = *memupper;
-#endif
-	os::common::size_t heap = 4*1024*1024;
-	MemoryManager memoryManager(heap, memupper_value*1024 - heap - 10*1024);
-
-#ifdef __EMSCRIPTEN__
-	// Yield after memory initialization
-	emscripten_sleep(0);
-#endif
+	size_t heap = 8*1024*1024;
+	MemoryManager memoryManager(heap, mbi->memUpper*1024 - heap - 10*1024);
+	
+	TaskManager taskManager(gdt, &memoryManager);
 	
 	InterruptManager interrupts(0x20, gdt, &taskManager);
 	printf("Initializing Hardware, Stage 1\n");
 
-#ifdef __EMSCRIPTEN__
-	// Yield after interrupt manager
-	emscripten_sleep(0);
-#endif
-
 	DriverManager drvManager;
+	
+	//graphics
+	uint32_t graphicsWidth = WIDTH_13H;
+	uint32_t graphicsHeight = HEIGHT_13H;
+	uint8_t* graphicsAddress = nullptr;
+	
+	//vbe is set and not text mode
+	if ((mbi->flags & 0x1000) && mbi->frameBufferAddress != 0xb8000) {
+	
+		graphicsWidth = mbi->frameBufferWidth;
+		graphicsHeight = mbi->frameBufferHeight;
+		graphicsAddress = (uint8_t*)mbi->frameBufferAddress;
+	}
 	
 	//drivers and command line
 	AdvancedTechnologyAttachment ata0m(0x1F0, true);
-	VideoGraphicsArray vga;
-	printf("[KERNEL] VGA driver created\n");
+	VideoGraphicsArray vga(&memoryManager, graphicsAddress, graphicsWidth, graphicsHeight);
 	OFS_Table table;
-	FileSystem osakaFileSystem(&ata0m, &memoryManager, &table);
-#ifdef __EMSCRIPTEN__
-	// Expose filesystem to JavaScript for IndexedDB refresh callback
-	EM_ASM_({
-		Module._osakaFileSystemPtr = $0;
-	}, &osakaFileSystem);
-#endif
+	FileSystem osakaFileSystem(&ata0m, &memoryManager, &vga, &table);
 	Compiler compiler(&osakaFileSystem);
 	PIT pit(&interrupts);
 	CMOS cmos;
 	cmos.pit = &pit;
-	printf("[KERNEL] Drivers initialized\n");
 
 	CLIKeyboardEventHandler* kbhandler = (CLIKeyboardEventHandler*)memoryManager.malloc(sizeof(CLIKeyboardEventHandler));
-	new (kbhandler) CLIKeyboardEventHandler(gdt, &taskManager, &memoryManager, &osakaFileSystem, &compiler, &vga, &cmos, &drvManager);
+	new (kbhandler) CLIKeyboardEventHandler(gdt, &taskManager, &memoryManager, &osakaFileSystem, nullptr, &compiler, &vga, &cmos, &drvManager);
 	kbhandler->hash_cli_init(); //init command line
-	LoadMainCLI(true, kbhandler); // Store for JavaScript access
 	
-	KeyboardDriver* keyboard = (KeyboardDriver*)memoryManager.malloc(sizeof(KeyboardDriver));
-	new (keyboard) KeyboardDriver(&interrupts, kbhandler);
+	KeyboardDriver keyboard(&interrupts, kbhandler);
 	kbhandler->caps = false;
 	kbhandler->shift = false;
 	kbhandler->ctrl = false;
 
 
 	//gui driver stuff
-	Simulator osaka(&cmos);
-	Desktop desktop(320, 200, 0x01, &vga, gdt, &taskManager, 
+	Simulator osaka(&vga, &osakaFileSystem, &cmos);
+	Widget setGC(0,0,0,0);
+	setGC.gc = &vga;
+	Desktop desktop(graphicsWidth, graphicsHeight, 0x7f, &vga, gdt, &taskManager, 
 			&memoryManager, &osakaFileSystem, &compiler, 
 			&cmos, &drvManager, &osaka);
 	MouseDriver mouse(&interrupts, &desktop);
 
 
-	drvManager.AddDriver(keyboard);
+	drvManager.AddDriver(&keyboard);
 	drvManager.AddDriver(&mouse);
 	drvManager.AddDriver(&ata0m);
 
@@ -1128,109 +970,106 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	PCIController.SelectDrivers(&drvManager, &interrupts);
 
 
-	//network
-	amd_am79c973* eth0 = nullptr;
-#ifdef __EMSCRIPTEN__
-	// For web version, check if driver exists before accessing
-	// The network driver might not be available in web builds
-	if (drvManager.numDrivers > 3 && drvManager.drivers[3] != nullptr) {
-		eth0 = (amd_am79c973*)(drvManager.drivers[3]);
-	}
-#else
-	eth0 = (amd_am79c973*)(drvManager.drivers[3]);
-	//amd_am79c973 eth0(PCIController.PCIdev, &interrupts);
-	//drvManager.drivers[3] = &eth0;
-#endif
-
-
 	printf("\nInitializing Hardware, Stage 2\n");
 	drvManager.ActivateAll();
 	
-#ifdef __EMSCRIPTEN__
-	// Yield after driver activation
-	emscripten_sleep(0);
-#endif
+	//AC97* ac97 = (AC97*)(drvManager.drivers[4]);
+
+	//sort pci drivers
+	AC97* ac97 = nullptr;
+	amd_am79c973* eth0 = nullptr;
+
+	for (int i = 0; i < drvManager.numDrivers; i++) {
+	
+		switch (drvManager.drivers[i]->driverType) {
+		
+			case 1:
+				//network
+				eth0 = (amd_am79c973*)(drvManager.drivers[i]);
+				break;
+			case 2:
+				//sound
+				ac97 = (AC97*)(drvManager.drivers[i]);
+				break;
+			default:
+				break;
+		}
+	}
+
+
+	//AC97* ac97 = (AC97*)(drvManager.drivers[4]);
+	//eth0->verbose = true;
+	//amd_am79c973 eth0(PCIController.PCIdev, &interrupts);
+	//drvManager.drivers[3] = &eth0;
+	
 	
 	//network init
-	//IP Address
+	//IP Address of local machine
+	//uint8_t ip1 = 192, ip2 = 168, ip3 = 86, ip4 = 210;
 	uint8_t ip1 = 10, ip2 = 0, ip3 = 2, ip4 = 15;
 	uint32_t ip_be = ((uint32_t)ip4 << 24) | ((uint32_t)ip3 << 16) 
 			| ((uint32_t)ip2 << 8) | (uint32_t)ip1;
 	
-	// Network initialization - only if eth0 is available
-	EtherFrameProvider* etherframe = nullptr;
-	AddressResolutionProtocol* arp = nullptr;
-	InternetProtocolProvider* ipv4 = nullptr;
-	InternetControlMessageProtocol* icmp = nullptr;
-	Network* network = nullptr;
+	// IP Address of the default gateway
+	//uint8_t gip1 = 192, gip2 = 168, gip3 = 86, gip4 = 28;
+	uint8_t gip1 = 10, gip2 = 0, gip3 = 2, gip4 = 2;
+	uint32_t gip_be = ((uint32_t)gip4 << 24) | ((uint32_t)gip3 << 16) 
+			| ((uint32_t)gip2 << 8) | (uint32_t)gip1;
+
+	uint8_t subnet1 = 255, subnet2 = 255, subnet3 = 255, subnet4 = 0;
+	uint32_t subnet_be = ((uint32_t)subnet4 << 24) | ((uint32_t)subnet3 << 16) 
+			| ((uint32_t)subnet2 << 8) | (uint32_t)subnet1;
+
+	//eth0->verbose = true;
+	eth0->SetIPAddress(ip_be);
+	EtherFrameProvider etherframe(eth0, &memoryManager);
+	AddressResolutionProtocol arp(&etherframe);
+	InternetProtocolProvider ipv4(&etherframe, &arp, gip_be, subnet_be);
+	InternetControlMessageProtocol icmp(&ipv4);
+	UserDatagramProtocolProvider udp(&ipv4);
+	TransmissionControlProtocolProvider tcp(&ipv4);
 	
-	if (eth0 != nullptr) {
-		eth0->SetIPAddress(ip_be);
-		etherframe = new EtherFrameProvider(eth0);
-		arp = new AddressResolutionProtocol(etherframe);
-		
-		// IP Address of the default gateway
-		uint8_t gip1 = 10, gip2 = 0, gip3 = 2, gip4 = 2;
-		uint32_t gip_be = ((uint32_t)gip4 << 24) | ((uint32_t)gip3 << 16) 
-				| ((uint32_t)gip2 << 8) | (uint32_t)gip1;
-
-		uint8_t subnet1 = 255, subnet2 = 255, subnet3 = 255, subnet4 = 0;
-		uint32_t subnet_be = ((uint32_t)subnet4 << 24) | ((uint32_t)subnet3 << 16) 
-				| ((uint32_t)subnet2 << 8) | (uint32_t)subnet1;
-			           
-		ipv4 = new InternetProtocolProvider(etherframe, arp, gip_be, subnet_be);
-		icmp = new InternetControlMessageProtocol(ipv4);
-		
-		network = new Network(eth0, arp, ipv4, icmp, gip_be, subnet_be);
-		kbhandler->network = network;
-	} else {
-		// No network in web version
-		kbhandler->network = nullptr;
-	}
-
+	//NetworkHandler handler;
+	Network network(eth0, &arp, &ipv4, &icmp, &udp, &tcp, &osakaFileSystem, gip_be, subnet_be);
+	kbhandler->network = &network;
+	desktop.network = &network;
+	osaka.net = &network;
 
 	printf("Initializing Hardware, Stage 3\n");
 	interrupts.Activate();
+
 	
-#ifdef __EMSCRIPTEN__
-	// Yield after interrupt activation
-	emscripten_sleep(0);
-#endif
-	
+	arp.BroadcastMACAddress(gip_be);
+
+	//request ping
+	//icmp.RequestEchoReply(gip_be, nullptr, 0);
+
+	/*
+	UserDatagramProtocolSocket* udpsocket = udp.Connect(str2ip("8.8.8.8"), 53);
+	udp.Bind(udpsocket, &network);
+	uint8_t dns_msg[] = { 0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+				'p','o','r','t','q','u','i','z', 8, 'n','e','t', 3, 0x00, 0x00, 0x01, 0x00, 0x01 };
+	udpsocket->Send(dns_msg, 30);
+	*/
+
+	/*
+	TransmissionControlProtocolSocket* tcpsocket = network.tcp->Connect(str2ip("35.180.139.74"), 80);
+	network.tcp->Bind(tcpsocket, &network);
+	sleep(1000);
+	char* request = "GET / HTTP/1.1\r\nHost: portquiz.net\r\n\r\n";
+	tcpsocket->Send((uint8_t*)request, strlen(request));
+	network.tcp->Disconnect(tcpsocket);
+	*/
+
 	printf("\n\nEverything seems fine.\n");
-
 	interrupts.boot = true;
-	makeBeep(600);
-
-#ifdef __EMSCRIPTEN__
-	// Yield before entering loops
-	emscripten_sleep(0);
-#endif
+	
+	//makeBeep(600);
+	
+	
 
 	//while (1) {}
 	//everything beyond this point is no longer testing/initialization
-
-
-	//the boot screen and very important cube
-	/*
-	kbhandler->pressed = false;
-	Cube cubeData;
-	cubeData.cubeWidth = 20;
-	cubeData.width = 45;
-	cubeData.height = 20;
-	cubeData.distanceFromCam = 50;
-	cubeData.K1 = 10;
-	int backgroundASCIICode = ' ';
-	float incrementSpeed = 3.0;
-
-	while (kbhandler->pressed == false) {
-
-		cubeScreen(backgroundASCIICode, incrementSpeed, &cubeData);
-		printf("The Osaka Operating System");
-		sleep(10);
-	}
-	*/
-
 
 	//initialize command line hash table
 	kbhandler->gui = false;
@@ -1238,221 +1077,72 @@ extern "C" void kernelMain(void* multiboot_structure, uint32_t magicnumber) {
 	//kbhandler->OnKeyDown('\b');
 	//printf("\v");
 
-	printf("[KERNEL] Entering CLI mode\n");
-	printf("Type 'gui' to switch to GUI mode\n");
-	printf("\t"); // Display $ prompt
+	//printf("vbe mode info: ");
+	//printf(int2str(mbi->vbeModeInfo));
+	//printf("\n");
 
-	//this is the command line :D		
-	// Stay in CLI mode until 'gui' command is executed
-	while (!RequestGUIMode(false)) {
-#ifdef __EMSCRIPTEN__
-		// Check flag periodically and yield
-		if (RequestGUIMode(false)) {
-			printf("[KERNEL] GUI mode requested! Exiting CLI loop\n");
-			break;
-		}
-		emscripten_sleep(0); // Yield to allow mouse events to process
-#endif	
-
-		kbhandler->cli = true;
-
-		while (kbhandler->cliMode) {
-
-			kbhandler->cli = false;
-			kbhandler->modeSelect(kbhandler->cliMode, kbhandler->pressed, 
-					kbhandler->keyChar, kbhandler->ctrl, 0, 
-					&osakaFileSystem);
-			
-#ifdef __EMSCRIPTEN__
-			// Yield to browser event loop to prevent blocking
-			emscripten_sleep(0);
-#endif
-		}
+	//if booted in vesa mode, skip to gui
+	if (graphicsAddress == nullptr) {
 		
-#ifdef __EMSCRIPTEN__
-		// Yield to browser event loop to prevent blocking
-		emscripten_sleep(1);
-#endif
-	}
-	// Reset the GUI request flag
-	RequestGUIMode(true, false);
-	kbhandler->cli = true;
-	kbhandler->gui = true;
-
-	// Main mode switching loop - can switch between CLI and GUI
-	bool guiInitialized = false;
-	KeyboardDriver* keyboardDesktop = nullptr;
-	
-	while (1) {
-		// Initialize GUI on first entry (only once)
-		if (!guiInitialized) {
-			//initialize desktop
-			keyboardDesktop = (KeyboardDriver*)memoryManager.malloc(sizeof(KeyboardDriver));
-			new (keyboardDesktop) KeyboardDriver(&interrupts, &desktop);
-			drvManager.Replace(keyboardDesktop, 0);
-
-			desktop.CreateChild(1, "Osaka's Terminal", kbhandler);
-			printf("[KERNEL] Desktop created\n");
-			
-#ifdef __EMSCRIPTEN__
-			// For Emscripten, we draw directly in the main loop, not via task manager
-			// The task manager relies on timer interrupts which don't work the same way
-			LoadDesktopForTask(true, &desktop);
-			printf("[KERNEL] Desktop loaded for Emscripten (direct draw mode)\n");
-#else
-			//add task for drawing desktop (x86 version uses task manager)
-			LoadDesktopForTask(true, &desktop);
-			Task guiTask(gdt, DrawDesktopTask, "osakaOS GUI", 0);
-			taskManager.AddTask(&guiTask);
-			printf("[KERNEL] GUI task added\n");
-#endif
-
-			// Draw something to test the canvas
-			printf("[KERNEL] Testing canvas rendering...\n");
-			vga.FillRectangle(0, 0, 320, 200, 0x01); // Fill with blue
-			vga.DrawToScreen();
-			printf("[KERNEL] Test draw completed\n");
-			
-			// Force switch to graphics mode
-#ifdef __EMSCRIPTEN__
-			EM_ASM_({
-				if (Module.switchToGraphicsMode) {
-					Module.switchToGraphicsMode();
-					console.log('[JS] Forced switch to graphics mode');
-				}
-			});
-#endif
-			guiInitialized = true;
-		}
-		
-		//this is the gui :)
-		printf("[KERNEL] Entering GUI loop\n");
-		
-		// GUI mode loop
-		while (!RequestCLIMode(false)) {
-			//this is the loop where the kernel
-			//exists in, the rest is handed off
-			//to the taskmanager, godspeed o7
-			//			      /|
-			//			      / \
-		
-#ifdef __EMSCRIPTEN__
-			// For Emscripten, directly call desktop draw since task manager
-			// relies on timer interrupts which don't work the same way
-			// The desktop draw will yield via emscripten_sleep internally
-			desktop.Draw(desktop.gc);
-			// Yield to browser event loop to prevent blocking
-			emscripten_sleep(0);
-#else
-			// Original x86 version relies on task manager
-			// which is scheduled via timer interrupts
-#endif
-		}
-		
-		// Switching back to CLI mode
-		printf("[KERNEL] Switching back to CLI mode\n");
-		RequestCLIMode(true, false);
-		kbhandler->gui = false;
-		kbhandler->cli = true;
-		
-		// Restore CLI keyboard handler
-		drvManager.Replace(keyboard, 0);
-		
-		// Display $ prompt when switching back to CLI
-		printf("\t");
-		
-		// Switch to text mode and unlock pointer
-#ifdef __EMSCRIPTEN__
-		EM_ASM_({
-			console.log('[KERNEL] Switching to CLI mode - unlocking pointer and showing text canvas');
-			// Exit pointer lock if active
-			if (document.pointerLockElement) {
-				console.log('[KERNEL] Exiting pointer lock');
-				document.exitPointerLock();
-			}
-			// Switch to text mode (show text canvas, hide graphics canvas)
-			var textCanvas = document.getElementById('osaka-text-canvas');
-			var graphicsCanvas = document.getElementById('osaka-canvas');
-			console.log('[KERNEL] Text canvas:', textCanvas, 'Graphics canvas:', graphicsCanvas);
-			if (textCanvas && graphicsCanvas) {
-				textCanvas.style.display = 'block';
-				graphicsCanvas.style.display = 'none';
-				textCanvas.focus();
-				console.log('[KERNEL] Switched to text mode - text canvas shown, graphics hidden');
-			} else {
-				console.error('[KERNEL] Canvas elements not found!');
-			}
-			// Also try calling Module function if it exists
-			if (typeof Module !== 'undefined' && Module.switchToTextMode) {
-				Module.switchToTextMode();
-			}
-		});
-#endif
-		
-		// CLI mode loop
-		while (!RequestGUIMode(false)) {
-#ifdef __EMSCRIPTEN__
-			if (RequestGUIMode(false)) {
-				break;
-			}
-			emscripten_sleep(0);
-#endif	
+		//this is the text-mode command line
+		while (keyboard.handler->keyValue != 0x5b) { //0x5b = command/windows key	
 
 			kbhandler->cli = true;
 
 			while (kbhandler->cliMode) {
+
 				kbhandler->cli = false;
 				kbhandler->modeSelect(kbhandler->cliMode, kbhandler->pressed, 
 						kbhandler->keyChar, kbhandler->ctrl, 0, 
 						&osakaFileSystem);
-				
-#ifdef __EMSCRIPTEN__
-				emscripten_sleep(0);
-#endif
 			}
-			
-#ifdef __EMSCRIPTEN__
-			emscripten_sleep(1);
-#endif
 		}
+	} else {
+		//set vbe palette
+		//uint32_t vbePMI = ((uint32_t)mbi->vbeInterfaceSeg*16) + ((uint32_t)mbi->vbeInterfaceOff);
+		//uint16_t paletteOffset = (&vbePMI)+4;
+
+		vga.colorPaletteMask.Write(0xff);
+		vga.colorRegisterWrite.Write(0);
+
+		for (uint16_t i = 0; i < 256; i++) {
 		
-		// Switching back to GUI mode
-		printf("[KERNEL] Switching back to GUI mode\n");
-		RequestGUIMode(true, false);
-		kbhandler->gui = true;
-		kbhandler->cli = true;
-		
-		// Re-initialize desktop keyboard handler (reuse existing desktop)
-		// Reuse the existing keyboard driver if it exists, otherwise create a new one
-		if (keyboardDesktop == nullptr) {
-			keyboardDesktop = (KeyboardDriver*)memoryManager.malloc(sizeof(KeyboardDriver));
-			new (keyboardDesktop) KeyboardDriver(&interrupts, &desktop);
+			vga.colorDataPort.Write(((defaultPalette[i] >> 16) & 0xff) >> 2);
+			vga.colorDataPort.Write(((defaultPalette[i] >> 8) & 0xff) >> 2);
+			vga.colorDataPort.Write((defaultPalette[i] & 0xff) >> 2);
 		}
-		drvManager.Replace(keyboardDesktop, 0);
+	}
+	kbhandler->cli = true;
+	kbhandler->gui = true;
+
+
+	//initialize desktop
+	KeyboardDriver keyboardDesktop(&interrupts, &desktop);
+	drvManager.Replace(&keyboardDesktop, 0);
+
+	desktop.CreateButton("CLI", APP_TYPE_TERMINAL, cliButton);
+	desktop.CreateButton("PNT", APP_TYPE_KASUGAPAINT, paintButton);
+	desktop.CreateButton("JNL", APP_TYPE_JOURNAL, journalButton);
+	desktop.CreateButton("WEB", APP_TYPE_SHINOSAKA, browserButton);
+	desktop.CreateChild(1, "Osaka's Terminal", kbhandler);
 		
-		// Switch to graphics mode
-#ifdef __EMSCRIPTEN__
-		EM_ASM_({
-			console.log('[KERNEL] Switching to GUI mode - showing graphics canvas');
-			var textCanvas = document.getElementById('osaka-text-canvas');
-			var graphicsCanvas = document.getElementById('osaka-canvas');
-			console.log('[KERNEL] Text canvas:', textCanvas, 'Graphics canvas:', graphicsCanvas);
-			if (textCanvas && graphicsCanvas) {
-				textCanvas.style.display = 'none';
-				graphicsCanvas.style.display = 'block';
-				graphicsCanvas.focus();
-				console.log('[KERNEL] Switched to graphics mode - graphics canvas shown, text hidden');
-			} else {
-				console.error('[KERNEL] Canvas elements not found!');
-			}
-			// Also try calling Module function if it exists
-			if (typeof Module !== 'undefined' && Module.switchToGraphicsMode) {
-				Module.switchToGraphicsMode();
-			}
-		});
-#endif
-		
-		// Recreate terminal window when switching back to GUI
-		desktop.CreateChild(1, "Osaka's Terminal", kbhandler);
+
+	desktop.gc->SetMode(graphicsWidth, graphicsHeight, 8);
+	
+	//add task for drawing desktop
+	LoadDesktopForTask(true, &desktop);
+	Task guiTask(gdt, DrawDesktopTask, "osakaOS GUI", 0);
+	taskManager.AddTask(&guiTask);
+
+	
+	//this is the gui :)
+	while (1) {
+	
+		//this is the loop where the kernel
+		//exists in, the rest is handed off
+		//to the taskmanager, godspeed o7
+		//			      /|
+		//			      / \
+
 	}
 }
