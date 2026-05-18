@@ -696,25 +696,47 @@ void makeBeep(uint32_t freq) {
 
 uint16_t prng() {
 
+#ifdef __EMSCRIPTEN__
+	// On bare metal the seed comes from the PIT free-running
+	// counter; under wasm the port stubs return 0 so the LFSR
+	// degenerates and returns 0 every call. That made every
+	// `prng() %` site (sim event picks, screen-saver line
+	// endpoints, random object positions, etc.) freeze the
+	// scene. Seed from a high-resolution monotonic clock plus
+	// a stateful 16-bit LFSR so successive calls advance.
+	static uint16_t lfsr_state = 0;
+	if (lfsr_state == 0) {
+		double t = emscripten_get_now();
+		lfsr_state = (uint16_t)((uint32_t)t ^ ((uint32_t)t >> 16));
+		if (lfsr_state == 0) lfsr_state = 0xACE1u;
+	}
+	uint16_t lfsr = lfsr_state;
+	// Run a handful of LFSR cycles per call so successive
+	// invocations don't return the same value when called in
+	// a tight loop within a single millisecond.
+	for (int i = 0; i < 7; i++) {
+		uint16_t lsb = lfsr & 1u;
+		lfsr >>= 1;
+		lfsr ^= (-lsb) & 0xb400u;
+	}
+	// Mix in the wall clock so screen-saver-style "long pause
+	// then jump" code paths actually jump to a new spot.
+	lfsr ^= (uint16_t)(uint32_t)emscripten_get_now();
+	if (lfsr == 0) lfsr = 0xACE1u;
+	lfsr_state = lfsr;
+#else
 	//PIT pit;
-	
-	#ifndef __EMSCRIPTEN__
-	
+
 	asm("cli");
-	
-	#endif
+
 	Port8Bit cmdPort(0x43);
 	Port8Bit channel0(0x40);
 	cmdPort.Write(0x00);
-	
+
 	uint32_t seed = channel0.Read();
 	seed |= channel0.Read() << 8;
-	
-	#ifndef __EMSCRIPTEN__
-	
+
 	asm("sti");
-	
-	#endif
 	uint16_t lfsr = (uint16_t)seed;
 	uint16_t period = 0;
 
@@ -722,10 +744,11 @@ uint16_t prng() {
 		uint16_t lsb = lfsr & 1u;
 		lfsr >>= 1;
 		lfsr ^= (-lsb) & 0xb400u;
-		
+
 		period++;
 
 	} while (period < seed);
+#endif
 	
 
 	return lfsr;

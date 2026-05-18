@@ -507,25 +507,73 @@ void deleteFile(char* args, CommandLine* cli) {
 void copy(char* args, CommandLine* cli) {
 
 	if (argcount(args) < 2) {
-	
+
 		cli->PrintCommand("Atleast 2 files are needed for command.\n");
 		return;
 	}
-	uint32_t location = cli->filesystem->GetFileSector(argparse(args, 0));
-	
-	if (cli->filesystem->FileIf(location) == false) {
-		
+	// argparse() returns a pointer into a *stack-local* 256-byte
+	// buffer that ceases to be valid the moment it returns. Calling
+	// it twice gives two pointers that effectively alias the same
+	// address — the second call clobbers the first. Snapshot each
+	// arg into our own buffers before doing anything else.
+	char srcName[64], dstName[64];
+	for (int i = 0; i < 64; i++) { srcName[i] = 0; dstName[i] = 0; }
+	{
+		char* p = argparse(args, 0);
+		for (int i = 0; i < 63 && p[i] != '\0'; i++) srcName[i] = p[i];
+	}
+	{
+		char* p = argparse(args, 1);
+		for (int i = 0; i < 63 && p[i] != '\0'; i++) dstName[i] = p[i];
+	}
+
+	if (cli->filesystem->FileIf(cli->filesystem->GetFileSector(srcName)) == false) {
+
 		cli->PrintCommand("File to copy doesn't exist.\n");
 		return;
 	}
+	if (cli->filesystem->FileIf(cli->filesystem->GetFileSector(dstName))) {
 
-	//file block data
-	uint8_t data[OFS_BLOCK_SIZE];
+		cli->PrintCommand("Destination file already exists.\n");
+		return;
+	}
 
-	//create and copy file
-	bool created = cli->filesystem->NewFile(argparse(args, 1), data, OFS_BLOCK_SIZE);
+	// Determine how many blocks the source spans (at least one so
+	// empty files still get created), then create the destination
+	// with the same logical size. NewFile reserves enough sectors
+	// for `size` and writes the first block; subsequent blocks have
+	// to be copied via WriteLBA. Upstream's copy() never even read
+	// the source — it wrote whatever uninitialised stack bytes the
+	// `data[OFS_BLOCK_SIZE]` declaration happened to alias.
+	uint32_t size = cli->filesystem->GetFileSize(srcName);
+	uint32_t lbaCount = size / OFS_BLOCK_SIZE;
+	if (lbaCount == 0) lbaCount = 1;
 
+	uint8_t blockBuf[OFS_BLOCK_SIZE];
+	for (int i = 0; i < OFS_BLOCK_SIZE; i++) blockBuf[i] = 0;
 
+	// Seed the new file with the first block of the source.
+	cli->filesystem->ReadLBA(srcName, blockBuf, 0);
+	bool created = cli->filesystem->NewFile(dstName, blockBuf, size ? size : OFS_BLOCK_SIZE);
+	if (!created) {
+
+		cli->PrintCommand("Failed to create destination file.\n");
+		return;
+	}
+
+	// Copy remaining blocks one at a time.
+	for (uint32_t i = 1; i < lbaCount; i++) {
+
+		for (int j = 0; j < OFS_BLOCK_SIZE; j++) blockBuf[j] = 0;
+		cli->filesystem->ReadLBA(srcName, blockBuf, i);
+		cli->filesystem->WriteLBA(dstName, blockBuf, i);
+	}
+
+	cli->PrintCommand("Copied '");
+	cli->PrintCommand(srcName);
+	cli->PrintCommand("' -> '");
+	cli->PrintCommand(dstName);
+	cli->PrintCommand("'.\n");
 }
 
 

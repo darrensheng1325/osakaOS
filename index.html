@@ -585,42 +585,19 @@
                     };
                 }
 
-                // Re-attach httpFetchOverWeb if missing — the kernel
-                // browser app calls this via EM_ASM to issue HTTP
-                // requests through a real `fetch()` (the kernel TCP
-                // stack can't actually open sockets in a browser).
+                // Re-attach httpFetchOverWeb if missing — emscripten's
+                // Module merge sometimes drops user-added properties.
+                // Both this re-attach and the literal version above
+                // forward into the single Module.__osakaDoFetch helper
+                // so the mixed-content prompt / proxy logic only lives
+                // in one place.
                 if (!Module.httpFetchOverWeb) {
                     console.error('[JS] httpFetchOverWeb missing after runtime init! Re-attaching...');
                     Module.httpFetchOverWeb = function(domainOrUrl, requestId) {
-                        try {
-                            var override = (typeof window !== 'undefined') ? window.osakaHttpProxy : null;
-                            var url = domainOrUrl;
-                            if (override && typeof override === 'string') {
-                                url = override.replace(/\/$/, '') + '/' + encodeURIComponent(domainOrUrl);
-                            } else if (!/^https?:\/\//i.test(url)) {
-                                url = 'http://' + url;
-                            }
-                            fetch(url, { method: 'GET', headers: { 'Accept': 'text/html,*/*' }, mode: 'cors', redirect: 'follow' })
-                              .then(function(resp) { return resp.text().then(function(b){ return {status:resp.status,statusText:resp.statusText,body:b}; }); })
-                              .then(function(r) {
-                                var preamble = 'HTTP/1.1 ' + r.status + ' ' + (r.statusText || 'OK') + '\r\n' +
-                                               'Server: osakaOS-web\r\nContent-Type: text/html\r\n' +
-                                               'Content-Length: ' + r.body.length + '\r\nConnection: close\r\n\r\n';
-                                var bytes = new TextEncoder().encode(preamble + r.body);
-                                if (!Module._malloc || !Module._httpFetchCallback) return;
-                                var ptr = Module._malloc(bytes.length);
-                                if (!ptr) return;
-                                HEAPU8.set(bytes, ptr);
-                                Module._httpFetchCallback(requestId, ptr, bytes.length);
-                                if (Module._free) Module._free(ptr);
-                              })
-                              .catch(function(err) {
-                                console.warn('[JS] HTTP fetch failed for', url, err);
-                                if (Module._httpFetchFail) Module._httpFetchFail(requestId);
-                              });
-                        } catch (e) {
-                            console.error('[JS] httpFetchOverWeb threw', e);
-                            if (Module._httpFetchFail) Module._httpFetchFail(requestId);
+                        if (window.__osakaDoFetch) {
+                            window.__osakaDoFetch(domainOrUrl, requestId);
+                        } else if (Module._httpFetchFail) {
+                            Module._httpFetchFail(requestId);
                         }
                     };
                 }
@@ -1075,54 +1052,136 @@
         // HandleResponseHTTP/AllocateMemoryHTML/RenderHTML pipeline
         // sees exactly what it would have gotten over the wire, and
         // hand the bytes back through `_httpFetchCallback`.
-        Module.httpFetchOverWeb = function(domainOrUrl, requestId) {
+        // Persistent (per-tab) decisions about mixed-content fetches.
+        // Keys are origin strings ("http://example.com"); values are
+        // "allow" / "proxy" so the user only gets prompted once per
+        // origin per session. Stored on `window` instead of `Module`
+        // because emscripten's Module merge silently drops user-added
+        // properties at runtime init.
+        window.__osakaMixedDecisions = window.__osakaMixedDecisions || {};
+
+        // Surface a mixed-content prompt in the page. Returns a
+        // Promise resolving to one of "allow" (open in new tab),
+        // "proxy" (route through window.osakaHttpProxy if set),
+        // or "cancel".
+        window.__osakaPromptInsecure = function(url) {
+            var origin = url;
+            try { origin = new URL(url).origin; } catch (e) {}
+            if (window.__osakaMixedDecisions[origin]) {
+                return Promise.resolve(window.__osakaMixedDecisions[origin]);
+            }
+            return new Promise(function(resolve) {
+                var overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;font-family:monospace;color:#0f0;';
+                var box = document.createElement('div');
+                box.style.cssText = 'background:#000;border:2px solid #0f0;padding:20px;max-width:520px;text-align:center;';
+                box.innerHTML =
+                    '<div style="font-size:18px;margin-bottom:10px">Insecure content blocked</div>' +
+                    '<div style="font-size:13px;margin-bottom:8px;word-break:break-all">' +
+                    'This page is loaded over HTTPS but the kernel asked to fetch:<br><b>' + url + '</b></div>' +
+                    '<div style="font-size:12px;margin-bottom:14px">Browsers block fetching HTTP from HTTPS. ' +
+                    'Choose how to proceed:</div>';
+                var mkBtn = function(label, value, hint) {
+                    var b = document.createElement('button');
+                    b.textContent = label;
+                    b.title = hint || '';
+                    b.style.cssText = 'margin:4px;padding:6px 12px;background:#000;color:#0f0;border:1px solid #0f0;font-family:monospace;cursor:pointer;';
+                    b.onclick = function() {
+                        window.__osakaMixedDecisions[origin] = value;
+                        document.body.removeChild(overlay);
+                        resolve(value);
+                    };
+                    return b;
+                };
+                box.appendChild(mkBtn('Open in new tab', 'allow', 'Opens the URL in a separate tab (no kernel response).'));
+                if (window.osakaHttpProxy) {
+                    box.appendChild(mkBtn('Route via proxy', 'proxy', 'Fetch through window.osakaHttpProxy = ' + window.osakaHttpProxy));
+                }
+                box.appendChild(mkBtn('Cancel', 'cancel', 'Drop the request.'));
+                overlay.appendChild(box);
+                document.body.appendChild(overlay);
+            });
+        };
+
+        // Shared fetch implementation used by both the literal Module
+        // and the re-attach branch below. Detects mixed content
+        // up-front, prompts the user, and either opens the URL in a
+        // new tab or routes through the proxy. Lives on `window` so
+        // it survives emscripten's Module merge.
+        window.__osakaDoFetch = function(domainOrUrl, requestId) {
             try {
                 var override = (typeof window !== 'undefined') ? window.osakaHttpProxy : null;
-                var url = domainOrUrl;
-                if (override && typeof override === 'string') {
-                    // Proxy mode: rewrite to <proxy>/<encoded url>.
-                    url = override.replace(/\/$/, '') + '/' + encodeURIComponent(domainOrUrl);
-                } else if (!/^https?:\/\//i.test(url)) {
-                    url = 'http://' + url;
-                }
-                fetch(url, {
-                    method: 'GET',
-                    headers: { 'Accept': 'text/html,*/*' },
-                    mode: 'cors',
-                    redirect: 'follow'
-                }).then(function(resp) {
-                    return resp.text().then(function(body) {
-                        return { status: resp.status, statusText: resp.statusText, body: body };
+                var rawUrl = domainOrUrl;
+                if (!/^https?:\/\//i.test(rawUrl)) rawUrl = 'http://' + rawUrl;
+                var pageHttps = (typeof location !== 'undefined' && location.protocol === 'https:');
+                var isMixed = pageHttps && /^http:\/\//i.test(rawUrl);
+
+                var doFinish = function(decision) {
+                    if (decision === 'cancel') {
+                        if (Module._httpFetchFail) Module._httpFetchFail(requestId);
+                        return;
+                    }
+                    if (decision === 'allow') {
+                        // We can't actually fetch HTTP from an HTTPS
+                        // origin — open in a new tab so the user can
+                        // at least see the content. The kernel-side
+                        // socket gets a synthetic "redirect" body so
+                        // it doesn't hang.
+                        try { window.open(rawUrl, '_blank', 'noopener'); } catch (e) {}
+                        var note = '<html><body><h2>Opened in new tab</h2><p>' +
+                            rawUrl + '</p><p>Mixed-content rules prevent fetching this from the kernel.</p></body></html>';
+                        window.__osakaDeliver(requestId, 200, 'OK', note);
+                        return;
+                    }
+                    // decision === 'proxy' OR no mix issue at all
+                    var url = rawUrl;
+                    if ((decision === 'proxy' || (override && !isMixed)) &&
+                        override && typeof override === 'string') {
+                        url = override.replace(/\/$/, '') + '/' + encodeURIComponent(rawUrl);
+                    }
+                    fetch(url, {
+                        method: 'GET',
+                        headers: { 'Accept': 'text/html,*/*' },
+                        mode: 'cors',
+                        redirect: 'follow'
+                    }).then(function(resp) {
+                        return resp.text().then(function(body) {
+                            return { status: resp.status, statusText: resp.statusText, body: body };
+                        });
+                    }).then(function(r) {
+                        window.__osakaDeliver(requestId, r.status, r.statusText, r.body);
+                    }).catch(function(err) {
+                        console.warn('[JS] HTTP fetch failed for', url, err);
+                        if (Module._httpFetchFail) Module._httpFetchFail(requestId);
                     });
-                }).then(function(r) {
-                    var preamble = 'HTTP/1.1 ' + r.status + ' ' + (r.statusText || 'OK') + '\r\n' +
-                                   'Server: osakaOS-web\r\n' +
-                                   'Content-Type: text/html\r\n' +
-                                   'Content-Length: ' + r.body.length + '\r\n' +
-                                   'Connection: close\r\n' +
-                                   '\r\n';
-                    var full = preamble + r.body;
-                    var bytes = new TextEncoder().encode(full);
-                    if (!Module._malloc || !Module._httpFetchCallback) {
-                        console.error('[JS] httpFetchOverWeb missing _malloc/_httpFetchCallback');
-                        return;
-                    }
-                    var ptr = Module._malloc(bytes.length);
-                    if (!ptr) {
-                        console.error('[JS] httpFetchOverWeb malloc failed');
-                        return;
-                    }
-                    HEAPU8.set(bytes, ptr);
-                    Module._httpFetchCallback(requestId, ptr, bytes.length);
-                    if (Module._free) Module._free(ptr);
-                }).catch(function(err) {
-                    console.warn('[JS] HTTP fetch failed for', url, err);
-                    if (Module._httpFetchFail) Module._httpFetchFail(requestId);
-                });
+                };
+
+                if (isMixed) {
+                    window.__osakaPromptInsecure(rawUrl).then(doFinish);
+                } else {
+                    doFinish('proceed');
+                }
             } catch (e) {
                 console.error('[JS] httpFetchOverWeb threw', e);
                 if (Module._httpFetchFail) Module._httpFetchFail(requestId);
             }
+        };
+
+        window.__osakaDeliver = function(requestId, status, statusText, body) {
+            var preamble = 'HTTP/1.1 ' + status + ' ' + (statusText || 'OK') + '\r\n' +
+                           'Server: osakaOS-web\r\nContent-Type: text/html\r\n' +
+                           'Content-Length: ' + body.length + '\r\nConnection: close\r\n\r\n';
+            var bytes = new TextEncoder().encode(preamble + body);
+            if (!Module._malloc || !Module._httpFetchCallback) return;
+            var ptr = Module._malloc(bytes.length);
+            if (!ptr) return;
+            HEAPU8.set(bytes, ptr);
+            Module._httpFetchCallback(requestId, ptr, bytes.length);
+            if (Module._free) Module._free(ptr);
+        };
+
+        Module.httpFetchOverWeb = function(domainOrUrl, requestId) {
+            window.__osakaDoFetch(domainOrUrl, requestId);
         };
 
         // Pushed pixel buffer (320x200 indexed) from the kernel to the
